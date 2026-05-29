@@ -1,16 +1,3 @@
-/**
- * main.js
- * App orchestrator — wires all modules together.
- * Replaces the monolith's massive inline script block.
- *
- * Responsibilities:
- *   - Initialise state
- *   - Connect WebSocket feeds
- *   - Respond to candle events → update state → trigger draws
- *   - Keyboard shortcuts
- *   - UI event delegation
- */
-
 import { state, resetCandleState } from './state/store.js';
 import { loadSettings, saveSettings, loadWatchlist, saveWatchlist, loadCollapsed, saveCollapsed } from './state/persistence.js';
 import { fmt, fmtSym, fmtK, TF_MS } from './utils/helpers.js';
@@ -21,15 +8,16 @@ import { computeSuggestion, scoreEntryQuality, computeEntryZones, computePartial
 import { calcFuturesMetrics, calcRiskBasedSize, calcATRStop, calcATRTrailStop, calcDailyGoal, suggestLeverage } from './engine/risk.js';
 import { KlineWebSocket, TradeStream, fetchKlines, fetchKlinesFallback } from './services/exchange.js';
 import { analyseSymbol, applyScreenerFilters, sortScreenerResults, detectSectorRotation, SCR_DEFAULT_COINS, SCR_CURATED_TIERS } from './services/screener.js';
-import { drawPrice, drawRSI, drawVolume, drawCVD } from './charts/draw.js';
 import { initJournal, openJournalEntry, saveJournalEntry, renderJournalList, renderJournalStats, exportJournal, deleteJournalTrade, editJournalTrade } from './components/journal.js';
 import { LWCChart } from './charts/lwc.js';
 import { backtesterHTML, btRun, btCompare, btExport, initBacktester } from './components/backtester.js';
 
+// ── Module-level chart reference ──────────────────────────────────────────────
 let _lwcChart = null;
 
-// Make key functions global (called from inline HTML onclick attributes)
+// ── Global exports (called from inline HTML onclick / oninput) ────────────────
 Object.assign(window, {
+  state,
   fmt, fmtSym, fmtK,
   saveJournalEntry, renderJournalList, deleteJournalTrade, editJournalTrade, exportJournal,
   toggleCard, loadCoinFromScreener, switchExchange, switchTF, switchSym,
@@ -40,78 +28,108 @@ Object.assign(window, {
   anchorToSessionOpen, clearAnchor, replayLoad, replayToggle, replayStep, replayReset,
   openJournalEntry,
   btRun, btCompare, btExport,
+  computeAndRender,
+  renderScreenerTable,
 });
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const DPR         = window.devicePixelRatio || 1;
 const FIB_CONFIGS = [
-  { r:0,     label:'0%',    col:'rgba(255,255,255,0.15)' },
-  { r:0.236, label:'23.6%', col:'rgba(255,184,46,0.5)'  },
-  { r:0.382, label:'38.2%', col:'rgba(0,229,160,0.6)'   },
-  { r:0.5,   label:'50%',   col:'rgba(77,166,255,0.6)'  },
-  { r:0.618, label:'61.8%', col:'rgba(167,139,255,0.7)' },
-  { r:1,     label:'100%',  col:'rgba(255,255,255,0.15)' },
+  { r: 0,     label: '0%',    col: 'rgba(255,255,255,0.15)' },
+  { r: 0.236, label: '23.6%', col: 'rgba(255,184,46,0.5)'  },
+  { r: 0.382, label: '38.2%', col: 'rgba(0,229,160,0.6)'   },
+  { r: 0.5,   label: '50%',   col: 'rgba(77,166,255,0.6)'  },
+  { r: 0.618, label: '61.8%', col: 'rgba(167,139,255,0.7)' },
+  { r: 1,     label: '100%',  col: 'rgba(255,255,255,0.15)' },
 ];
 
-// ── WebSocket Instances ───────────────────────────────────────────────────────
-let klineWs       = null;
-let tradeStream   = null;
+// ── WebSocket instances ───────────────────────────────────────────────────────
+let klineWs         = null;
+let tradeStream     = null;
 let indicatorWorker = null;
 let workerPending   = false;
 let workerQueue     = null;
 
-// ── Boot ───────────────────────────────────────────────────────────────────────
+// ── AVWAP module-level anchor memory ─────────────────────────────────────────
+let _anchorMode = null;   // null | 'session'
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
 export function init() {
-  // Load persisted settings
-  const saved = loadSettings();
+  // 1. Load persisted settings
+  const saved    = loadSettings();
   state.sym      = saved?.sym      || 'BTCUSDT';
   state.tf       = saved?.tf       || '5m';
   state.exchange = saved?.exchange || 'bybit';
   state.watchlist = loadWatchlist();
 
-  // Restore collapsed state
+  // 2. Use Object.defineProperty if the store uses getters, otherwise direct assign.
+  _ensureAvwapState();
+
+  // 2b. Seed leverage from DOM default so first computeAndRender() is never NaN.
+  const levSlider  = document.getElementById('lev-slider');
+  const levManual  = document.getElementById('lev-manual');
+  const levDisplay = document.getElementById('lev-display');
+  const initLev    = +(levSlider?.value ?? 10);
+  state.leverage   = initLev;
+  if (levManual)  levManual.value        = initLev;
+  if (levDisplay) levDisplay.textContent = initLev + '×';
+  if (levSlider)  levSlider.style.setProperty('--lev-pct', ((initLev - 1) / 99 * 100) + '%');
+
+  // 3. Restore collapsed state
   const collapsed = loadCollapsed();
   Object.entries(collapsed).forEach(([id, isCollapsed]) => {
     const el = document.getElementById(id);
     if (el && isCollapsed) el.classList.add('collapsed');
   });
 
-  // Init journal
+  // 4. Sub-system init
   initJournal();
-
-  // Init worker
   initIndicatorWorker();
 
-  // Start feeds
-  initSym(state.sym, state.tf);
-
-  // Keyboard shortcuts
-  document.addEventListener('keydown', handleKeyDown);
-
-  // Canvas resize
-  window.addEventListener('resize', () => drawAll());
+  // 5. LWC chart — must exist before initSym() calls drawAll()
   _lwcChart = new LWCChart('lwc-container', { theme: state.isDark ? 'dark' : 'light' });
 
-  // Chart hover
-  setupChartHover();
+  // 6. Start data feeds
+  initSym(state.sym, state.tf);
 
-  // UI
+  // 7. Global event listeners
+  document.addEventListener('keydown', handleKeyDown);
+  window.addEventListener('resize', () => _lwcChart?._resize());
+
+  // 8. UI
+  setupChartHover();
   renderWatchlist();
   renderAlerts();
   renderPnL();
 
-  // Inject backtester UI
+  // 9. Phase 9 — inject backtester card
   const btSlot = document.getElementById('bt-placeholder');
   if (btSlot) btSlot.outerHTML = backtesterHTML();
   initBacktester();
 }
 
-// ── Symbol / TF Init ──────────────────────────────────────────────────────────
+// Ensure all AVWAP fields exist on state, safe to call multiple times.
+function _ensureAvwapState() {
+  if (!Array.isArray(state.avwapVals)) state.avwapVals  = [];
+  if (typeof state.avwapCumPV !== 'number') state.avwapCumPV = 0;
+  if (typeof state.avwapCumV  !== 'number') state.avwapCumV  = 0;
+  if (state.anchorIdx === undefined) state.anchorIdx = null;
+}
+
+// ── Symbol / TF init ──────────────────────────────────────────────────────────
 export async function initSym(sym, tf) {
-  state.sym = sym; state.tf = tf;
+  state.sym = sym;
+  state.tf  = tf;
   resetCandleState();
 
-  // Update UI pill highlights
+  _ensureAvwapState();
+
+  state.avwapVals  = [];
+  state.avwapCumPV = 0;
+  state.avwapCumV  = 0;
+  state.anchorIdx  = null;
+  _writeAvwapLabel();   // show "—" immediately while loading
+
+  // Highlight active pills
   document.querySelectorAll('#sym-group .pill-btn').forEach(b => {
     b.classList.remove('active', 'sym-active');
     const m = b.getAttribute('onclick')?.match(/'([A-Z]+)'/);
@@ -123,7 +141,6 @@ export async function initSym(sym, tf) {
   });
 
   document.title = `${fmtSym(sym)} · ${tf} — TradingTerminal`;
-
   setConnStatus('warn', `Loading ${fmtSym(sym)}…`);
 
   // Fetch historical candles
@@ -137,15 +154,17 @@ export async function initSym(sym, tf) {
     return;
   }
 
-  // Live price
   state.livePrice = state.candles[state.candles.length - 1]?.c || 0;
   updatePriceDisplay();
-  computeAndRender();
 
-  // Worker initial pass
+  if (_anchorMode === 'session') {
+    _applySessionAnchor(/* silent = */ true);
+  }
+
+  computeAndRender();
   dispatchToWorker([...state.candles]);
 
-  // WebSocket
+  // Live kline WebSocket
   klineWs?.close();
   klineWs = new KlineWebSocket({
     exchName: state.exchange, sym, tf,
@@ -157,7 +176,7 @@ export async function initSym(sym, tf) {
         dispatchToWorker([...state.candles]);
       } else {
         state.currentCandle = candle;
-        state.livePrice = candle.c;
+        state.livePrice     = candle.c;
         updatePriceDisplay();
         checkAlerts(candle.c);
         drawLive();
@@ -167,7 +186,7 @@ export async function initSym(sym, tf) {
   });
   klineWs.connect();
 
-  // Trade stream
+  // Trade stream (for CVD delta)
   tradeStream?.close();
   tradeStream = new TradeStream({
     exchName: state.exchange, sym,
@@ -178,9 +197,9 @@ export async function initSym(sym, tf) {
   saveSettings();
 }
 
-// ── Candle State Update ───────────────────────────────────────────────────────
+// ── Candle state update ───────────────────────────────────────────────────────
 function addCandleToState(c) {
-  // Dedup
+  // Dedup by timestamp
   if (state.candles.length > 0 && c.t) {
     const last = state.candles[state.candles.length - 1].t;
     if (last && c.t <= last) return;
@@ -197,22 +216,29 @@ function addCandleToState(c) {
 
   // RSI
   const rsiRes = calcWilderRSI(c.c, state.prevClose, {
-    avgGain: state.rmaAvgGain, avgLoss: state.rmaAvgLoss,
-    _gains: state._rsiGains || [], _losses: state._rsiLosses || []
+    avgGain:  state.rmaAvgGain,
+    avgLoss:  state.rmaAvgLoss,
+    _gains:   state._rsiGains  || [],
+    _losses:  state._rsiLosses || [],
   });
-  state.rmaAvgGain   = rsiRes.avgGain;
-  state.rmaAvgLoss   = rsiRes.avgLoss;
-  state._rsiGains    = rsiRes._gains;
-  state._rsiLosses   = rsiRes._losses;
+  state.rmaAvgGain  = rsiRes.avgGain;
+  state.rmaAvgLoss  = rsiRes.avgLoss;
+  state._rsiGains   = rsiRes._gains;
+  state._rsiLosses  = rsiRes._losses;
   state.rsiVals.push(rsiRes.rsi);
-  state.prevClose = c.c;
+  state.prevClose   = c.c;
 
   // VWAP
-  const vwapRes = updVWAP(c, { cumPV: state.vwapCumPV, cumV: state.vwapCumV, m2: state.vwapM2, sessionKey: state.vwapSessionKey });
-  state.vwapCumPV     = vwapRes.newState.cumPV;
-  state.vwapCumV      = vwapRes.newState.cumV;
-  state.vwapM2        = vwapRes.newState.m2;
-  state.vwapSessionKey= vwapRes.newState.sessionKey;
+  const vwapRes = updVWAP(c, {
+    cumPV:      state.vwapCumPV,
+    cumV:       state.vwapCumV,
+    m2:         state.vwapM2,
+    sessionKey: state.vwapSessionKey,
+  });
+  state.vwapCumPV      = vwapRes.newState.cumPV;
+  state.vwapCumV       = vwapRes.newState.cumV;
+  state.vwapM2         = vwapRes.newState.m2;
+  state.vwapSessionKey = vwapRes.newState.sessionKey;
   state.vwapVals.push(vwapRes.vwap);
   state.vwapBandVals.push(vwapRes.bands);
 
@@ -224,7 +250,7 @@ function addCandleToState(c) {
   state.cvdVals.push(state.cvdRunning);
   state.cvdEmaVals.push(state.cvdEmaRun);
 
-  // Crossover detection
+  // EMA crossover detection
   if (prevE9 !== null && prevE20 !== null) {
     const bullCross = prevE9 <= prevE20 && state.e9 > state.e20;
     const bearCross = prevE9 >= prevE20 && state.e9 < state.e20;
@@ -237,23 +263,66 @@ function addCandleToState(c) {
 
   state.candles.push(c);
 
-  // Trim to 150
+  if (state.anchorIdx !== null) {
+    _appendAvwapBar(c);
+  }
+
+  // Trim ring-buffer to 150 bars
   if (state.candles.length > 150) {
-    state.candles.shift(); state.e9s.shift(); state.e20s.shift(); state.e50s.shift(); state.rsiVals.shift();
-    state.vwapVals.shift(); state.vwapBandVals.shift(); state.cvdVals.shift(); state.cvdEmaVals.shift();
-    state.crossovers = state.crossovers.map(x => ({ ...x, idx: x.idx - 1 })).filter(x => x.idx >= 0);
+    state.candles.shift();
+    state.e9s.shift();   state.e20s.shift();  state.e50s.shift();
+    state.rsiVals.shift();
+    state.vwapVals.shift(); state.vwapBandVals.shift();
+    state.cvdVals.shift();  state.cvdEmaVals.shift();
+
+    if (state.anchorIdx !== null) {
+      state.anchorIdx--;
+      if (state.anchorIdx < 0) {
+        // Anchor candle was evicted
+        state.anchorIdx  = null;
+        state.avwapVals  = [];
+        state.avwapCumPV = 0;
+        state.avwapCumV  = 0;
+        _anchorMode      = null;   // clear module-level mode too
+        _writeAvwapLabel();
+        showToast('AVWAP anchor evicted (window full) — re-anchor with A', 'warn');
+      } else {
+        state.avwapVals.shift();
+      }
+    }
+
+    state.crossovers = state.crossovers
+      .map(x => ({ ...x, idx: x.idx - 1 }))
+      .filter(x => x.idx >= 0);
   }
 }
 
-// ── Compute + Render ──────────────────────────────────────────────────────────
+function _appendAvwapBar(c) {
+  const tp = (c.h + c.l + c.c) / 3;
+  // Guard against zero/missing volume — use TP as fallback so no NaN leaks in.
+  const vol = (c.v > 0) ? c.v : 0;
+  state.avwapCumPV += tp * vol;
+  state.avwapCumV  += vol;
+  const v = state.avwapCumV > 0 ? state.avwapCumPV / state.avwapCumV : c.c;
+  state.avwapVals.push(v);
+}
+
+// Safe single read-point for latest AVWAP value.
+function _getLatestAvwap() {
+  if (!Array.isArray(state.avwapVals) || state.avwapVals.length === 0) return null;
+  const v = state.avwapVals[state.avwapVals.length - 1];
+  return (v != null && !isNaN(v)) ? v : null;
+}
+
+// ── compute + render (full refresh) ──────────────────────────────────────────
 function computeAndRender() {
   const all = [...state.candles, state.currentCandle].filter(Boolean);
   const atr = calcATR(all, 14);
 
-  // Regime
+  // Market regime
   state.regime = detectRegime(all, state.e20s, state.livePrice);
 
-  // Swing points + structure
+  // Swing structure
   if (all.length >= 10) {
     state.swingPoints     = detectSwingPoints(all.slice(-60), 3, 3);
     state.structureEvents = detectStructureBreaks(all.slice(-60), state.swingPoints);
@@ -262,50 +331,57 @@ function computeAndRender() {
   // Session levels
   state.sessionLevels = getSessionLevels(all);
 
-  // Suggestion
-  const latest = state.rsiVals[state.rsiVals.length - 1];
-  const vwap   = state.vwapVals[state.vwapVals.length - 1];
+  const latestRSI   = state.rsiVals[state.rsiVals.length - 1];
+  const latestVwap  = state.vwapVals[state.vwapVals.length - 1];
+  const latestAvwap = _getLatestAvwap();   // null when no anchor set
+
+  // Trade suggestion
   const sug = computeSuggestion({
     e9: state.e9, e20: state.e20, e50: state.e50,
-    livePrice: state.livePrice, rsi: latest, rrRatio: state.rrRatio,
-    tf: state.tf, candles: all, vwap, regime: state.regime,
+    livePrice: state.livePrice, rsi: latestRSI, rrRatio: state.rrRatio,
+    tf: state.tf, candles: all, vwap: latestVwap,
+    avwap: latestAvwap,
+    regime: state.regime,
   });
   if (sug) state.suggestion = sug;
 
   // Entry quality
   const cvdLast = state.cvdVals[state.cvdVals.length - 1];
   const quality = scoreEntryQuality({
-    dir: state.currentDir, rsi: latest, e9: state.e9, e20: state.e20, e50: state.e50,
-    price: state.livePrice, vwap, cvd: cvdLast,
+    dir: state.currentDir, rsi: latestRSI, e9: state.e9, e20: state.e20, e50: state.e50,
+    price: state.livePrice, vwap: latestVwap,
+    avwap: latestAvwap,
+    cvd: cvdLast,
     crossovers: state.crossovers, tf: state.tf, candles: all, regime: state.regime,
   });
 
   // Entry zones
   const zones = computeEntryZones({ e9: state.e9, e20: state.e20, livePrice: state.livePrice, suggestion: sug, atr });
   if (zones) state.entryZones = zones;
+  updateEntryZonesUI(zones);
 
-  // Partial TPs
-  const tps = computePartialTPs({ entry: sug?.entry, stop: sug?.stop, dir: sug?.dir });
-
-  // ATR trailing stop
+  // Partial TPs + ATR trail
+  const tps       = computePartialTPs({ entry: sug?.entry, stop: sug?.stop, dir: sug?.dir });
   const trailStop = calcATRTrailStop(state.livePrice, atr, state.currentDir, 2);
 
-  // ATR position size
+  // ATR position sizing
   const capital = +document.getElementById('inp-capital')?.value || 100;
-  const riskPct = 1; // default 1%
-  const atrSize = atr ? calcAtrPositionSize({ capital, riskPct, entry: state.livePrice, atr, atrMultiple: 2 }) : null;
+  const atrSize = atr ? calcAtrPositionSize({ capital, riskPct: 1, entry: state.livePrice, atr, atrMultiple: 2 }) : null;
 
   // Futures metrics
-  const leverage = state.leverage;
+  const leverage = state.leverage || 10;
   const margin   = +document.getElementById('inp-margin')?.value || 20;
-  const entry    = +document.getElementById('inp-entry')?.value  || sug?.entry || state.livePrice;
-  const stop     = +document.getElementById('inp-stop')?.value   || sug?.stop  || 0;
+  const entryRaw = document.getElementById('inp-entry')?.value;
+  const stopRaw  = document.getElementById('inp-stop')?.value;
+  const entry    = (entryRaw !== '' && +entryRaw) ? +entryRaw : (sug?.entry || state.livePrice);
+  const stop     = (stopRaw  !== '' && +stopRaw)  ? +stopRaw  : (sug?.stop  || 0);
+
   const futMetrics = calcFuturesMetrics({
     capital, margin, leverage, entry, stop,
-    dir: state.currentDir, rrRatio: state.rrRatio, feeType: state.feeType
+    dir: state.currentDir, rrRatio: state.rrRatio, feeType: state.feeType,
   });
 
-  // Update DOM
+  // Push to DOM
   updateSuggestionUI(sug, quality, tps, trailStop, atrSize);
   updateFuturesUI(futMetrics, leverage, entry);
   updateRegimeUI(state.regime);
@@ -314,10 +390,9 @@ function computeAndRender() {
   drawAll();
 }
 
-// ── Draw Coordinator ──────────────────────────────────────────────────────────
+// ── Chart draw (full dataset) ─────────────────────────────────────────────────
 function drawAll() {
   if (!_lwcChart) return;
-
   _lwcChart.setData(state.candles, {
     e9s:        state.e9s,
     e20s:       state.e20s,
@@ -328,45 +403,41 @@ function drawAll() {
     cvdVals:    state.cvdVals,
     cvdEmaVals: state.cvdEmaVals,
   });
-
-  if (state.suggestion?.entry) {
-    _lwcChart.setSuggestion(state.suggestion);
-  }
-
-  if (state.sessionLevels) {
-    _lwcChart.setSessionLevels(state.sessionLevels);
-  }
-
+  if (state.suggestion?.entry) _lwcChart.setSuggestion(state.suggestion);
+  if (state.sessionLevels)     _lwcChart.setSessionLevels(state.sessionLevels);
   if (state.structureEvents?.length) {
     _lwcChart.setStructureEvents(state.candles, state.structureEvents);
   }
 }
 
-// ── Live Candle Update (unconfirmed ticks only) ───────────────────────────────
+// ── Live candle paint (unconfirmed tick) ──────────────────────────────────────
 function drawLive() {
-  if (_lwcChart && state.currentCandle) {
-    const c = { ...state.currentCandle };
-    c._liveVwap = state.vwapVals[state.vwapVals.length - 1];
-    c._liveRsi  = state.rsiVals[state.rsiVals.length - 1];
-    c._liveCvd  = state.cvdVals[state.cvdVals.length - 1];
-    _lwcChart.updateLiveCandle(c);
+  if (!_lwcChart || !state.currentCandle) return;
+
+  const c = { ...state.currentCandle };
+  c._liveVwap = state.vwapVals[state.vwapVals.length - 1];
+  c._liveRsi  = state.rsiVals[state.rsiVals.length - 1];
+  c._liveCvd  = state.cvdVals[state.cvdVals.length - 1];
+
+  // Live AVWAP for the forming bar (does not commit to avwapVals)
+  if (state.anchorIdx !== null && state.avwapCumV > 0) {
+    const tp    = (c.h + c.l + c.c) / 3;
+    const vol   = c.v > 0 ? c.v : 0;
+    const liveV = state.avwapCumV + vol;
+    c._liveAvwap = liveV > 0 ? (state.avwapCumPV + tp * vol) / liveV : null;
   }
+
+  _lwcChart.updateLiveCandle(c);
+
+  // Refresh the AVWAP DOM label on every live tick — fixes "—" between confirmed bars.
+  _writeAvwapLabel();
 }
 
-function buildFibLevels(all) {
-  const vis = all.slice(-70);
-  if (vis.length < 5) return null;
-  const hi = Math.max(...vis.map(c => c.h));
-  const lo = Math.min(...vis.map(c => c.l));
-  const range = hi - lo;
-  return FIB_CONFIGS.map(f => ({ ...f, price: hi - range * f.r }));
-}
-
-// ── Indicator Worker ──────────────────────────────────────────────────────────
+// ── Indicator web-worker ──────────────────────────────────────────────────────
 function initIndicatorWorker() {
   try {
     indicatorWorker = new Worker('./workers/indicator.worker.js');
-    indicatorWorker.onmessage = (e) => {
+    indicatorWorker.onmessage = e => {
       workerPending = false;
       if (e.data.type === 'result') onWorkerResult(e.data);
       if (workerQueue) { const q = workerQueue; workerQueue = null; dispatchToWorker(q); }
@@ -383,17 +454,14 @@ function dispatchToWorker(candles) {
 }
 
 function onWorkerResult(data) {
-  if (data.vp) {
-    state.workerVP = data.vp;
-    updateVPLabels(data.vp);
-  }
+  if (data.vp) { state.workerVP = data.vp; updateVPLabels(data.vp); }
   if (data.regime) state.regime = { ...state.regime, ...data.regime };
   drawAll();
 }
 
-// ── Trade Tick Processing ─────────────────────────────────────────────────────
-function processTradeTick({ price, qty, side, ts }) {
-  if (side === 'buy') { state.tradeStreamDelta += qty; state.tradeBuyVol += qty; }
+// ── Trade tick (order-flow delta) ─────────────────────────────────────────────
+function processTradeTick({ price, qty, side }) {
+  if (side === 'buy') { state.tradeStreamDelta += qty; state.tradeBuyVol  += qty; }
   else                { state.tradeStreamDelta -= qty; state.tradeSellVol += qty; }
   if (state.currentCandle) state.currentCandle._realDelta = state.tradeStreamDelta;
   state.tradeTickBuf.push({ price, side, ts: Date.now() });
@@ -401,7 +469,7 @@ function processTradeTick({ price, qty, side, ts }) {
   updateDeltaTicker();
 }
 
-// ── UI Updaters ───────────────────────────────────────────────────────────────
+// ── DOM updaters ──────────────────────────────────────────────────────────────
 function updatePriceDisplay() {
   const el = document.getElementById('live-price');
   if (!el) return;
@@ -416,7 +484,10 @@ function updatePriceDisplay() {
 
   const chg   = state.openPrice > 0 ? ((state.livePrice - state.openPrice) / state.openPrice * 100) : 0;
   const chgEl = document.getElementById('live-change');
-  if (chgEl) { chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%'; chgEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)'; }
+  if (chgEl) {
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    chgEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+  }
 }
 
 function setConnStatus(type, msg) {
@@ -427,29 +498,43 @@ function setConnStatus(type, msg) {
 }
 
 function updateVPLabels(vp) {
-  const el = id => document.getElementById(id);
-  if (el('vp-poc-val')) el('vp-poc-val').textContent = fmt(vp.poc);
-  if (el('vp-vah-val')) el('vp-vah-val').textContent = fmt(vp.vah);
-  if (el('vp-val-val')) el('vp-val-val').textContent = fmt(vp.val);
+  const g = id => document.getElementById(id);
+  if (g('vp-poc-val')) g('vp-poc-val').textContent = fmt(vp.poc);
+  if (g('vp-vah-val')) g('vp-vah-val').textContent = fmt(vp.vah);
+  if (g('vp-val-val')) g('vp-val-val').textContent = fmt(vp.val);
+}
+
+function updateEntryZonesUI(zones) {
+  if (!zones) return;
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  set('zone-agg', fmt(zones.aggressive));
+  set('zone-bal', fmt(zones.balanced));
+  set('zone-con', fmt(zones.conservative));
 }
 
 function updateRegimeUI(regime) {
   const el = document.getElementById('regime-display');
   if (!el || !regime) return;
-  const typeMap = { trending: regime.dir === 'bull' ? 'regime-trending-bull' : 'regime-trending-bear', ranging: 'regime-ranging', choppy: 'regime-choppy' };
-  el.className  = 'regime-badge ' + (typeMap[regime.type] || '');
+  const typeMap = {
+    trending: regime.dir === 'bull' ? 'regime-trending-bull' : 'regime-trending-bear',
+    ranging:  'regime-ranging',
+    choppy:   'regime-choppy',
+  };
+  el.className   = 'regime-badge ' + (typeMap[regime.type] || '');
   el.textContent = regime.label;
-  const advEl = document.getElementById('regime-advice');
-  if (advEl) advEl.textContent = regime.advice || '';
-  const adxEl = document.getElementById('regime-adx'); if (adxEl) adxEl.textContent = regime.adx?.toFixed(1) ?? '—';
-  const erEl  = document.getElementById('regime-er');  if (erEl)  erEl.textContent  = regime.er?.toFixed(2)  ?? '—';
+  const advEl = document.getElementById('regime-advice'); if (advEl) advEl.textContent = regime.advice || '';
+  const adxEl = document.getElementById('regime-adx');    if (adxEl) adxEl.textContent = regime.adx?.toFixed(1) ?? '—';
+  const erEl  = document.getElementById('regime-er');     if (erEl)  erEl.textContent  = regime.er?.toFixed(2)  ?? '—';
 }
 
 function updateStructureUI(swings, events) {
   const el = document.getElementById('structure-events');
   if (!el) return;
-  const recent = events.slice(-5).reverse();
-  if (!recent.length) { el.innerHTML = '<span style="color:var(--text3);font-size:9px;font-family:var(--mono)">No recent structure breaks</span>'; return; }
+  const recent = (events || []).slice(-5).reverse();
+  if (!recent.length) {
+    el.innerHTML = '<span style="color:var(--text3);font-size:9px;font-family:var(--mono)">No recent structure breaks</span>';
+    return;
+  }
   el.innerHTML = recent.map(ev => {
     const cls = `struct-${ev.type.toLowerCase()}-${ev.dir}`;
     return `<span class="signal-badge ${cls}" style="font-size:8px;padding:1px 7px">${ev.type} ${ev.dir === 'bull' ? '↑' : '↓'}</span>`;
@@ -458,8 +543,8 @@ function updateStructureUI(swings, events) {
 
 function updateSuggestionUI(sug, quality, tps, trailStop, atrSize) {
   if (!sug) return;
-  const set      = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  const setColor = (id, color) => { const el = document.getElementById(id); if (el) el.style.color = color; };
+  const set      = (id, val)   => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  const setColor = (id, color) => { const el = document.getElementById(id); if (el) el.style.color  = color; };
 
   set('sug-entry',  fmt(sug.entry));
   set('sug-stop',   fmt(sug.stop));
@@ -495,8 +580,7 @@ function updateSuggestionUI(sug, quality, tps, trailStop, atrSize) {
 
 function updateFuturesUI(metrics, leverage, entry) {
   if (!metrics) return;
-  const set      = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
-  const setColor = (id, col) => { const el = document.getElementById(id); if (el) el.style.color = col; };
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
 
   set('fv-pos-size',  '$' + metrics.posSize.toFixed(2));
   set('fv-liq-price', fmt(metrics.liqPrice));
@@ -513,16 +597,19 @@ function updateFuturesUI(metrics, leverage, entry) {
   const liqBar = document.getElementById('liq-bar');
   if (liqBar) {
     liqBar.style.width      = metrics.liqGaugePct + '%';
-    liqBar.style.background = metrics.liqDistPct < 10 ? 'var(--red)' : metrics.liqDistPct < 20 ? 'var(--amber)' : 'var(--green)';
+    liqBar.style.background = metrics.liqDistPct < 10
+      ? 'var(--red)' : metrics.liqDistPct < 20 ? 'var(--amber)' : 'var(--green)';
   }
 
   const warn = document.getElementById('risk-warn');
   if (warn) {
     const isHigh = metrics.riskPct > 3;
     const isMed  = metrics.riskPct > 2 && !isHigh;
-    warn.classList.toggle('show', isHigh || isMed);
-    warn.className = 'risk-warn show ' + (isHigh ? 'high' : 'med');
-    if (isHigh || isMed) warn.textContent = `⚠ Risk is ${metrics.riskPct.toFixed(1)}% of capital — ${isHigh ? 'consider reducing leverage or size' : 'acceptable but elevated'}.`;
+    warn.style.display = (isHigh || isMed) ? '' : 'none';
+    warn.className     = 'risk-warn ' + (isHigh ? 'high' : 'med');
+    if (isHigh || isMed) {
+      warn.textContent = `⚠ Risk is ${metrics.riskPct.toFixed(1)}% of capital — ${isHigh ? 'consider reducing leverage or size' : 'acceptable but elevated'}.`;
+    }
   }
 }
 
@@ -530,11 +617,20 @@ function updateLegendLabels() {
   const set  = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
   const vwap = state.vwapVals[state.vwapVals.length - 1];
   const cvd  = state.cvdVals[state.cvdVals.length - 1];
+
   set('leg-e9',   state.e9  ? fmt(state.e9)  : '—');
   set('leg-e20',  state.e20 ? fmt(state.e20) : '—');
   set('leg-e50',  state.e50 ? fmt(state.e50) : '—');
-  set('leg-vwap', vwap      ? fmt(vwap)       : '—');
+
+  // FIX: write BOTH vwap elements — leg-vwap (card-structure) and leg-vwap2 (card-ema).
+  // Previously leg-vwap2 was never written and always showed its initial "—".
+  const vwapStr = vwap ? fmt(vwap) : '—';
+  set('leg-vwap',  vwapStr);
+  set('leg-vwap2', vwapStr);
+
   if (cvd !== undefined) set('leg-cvd', (cvd >= 0 ? '+' : '') + fmtK(cvd));
+
+  _writeAvwapLabel();
 }
 
 function updateDeltaTicker() {
@@ -550,9 +646,10 @@ function updateDeltaTicker() {
   if (bar) { bar.style.width = pct + '%'; bar.style.background = net >= 0 ? 'var(--green)' : 'var(--red)'; }
 }
 
-// ── UI Actions ────────────────────────────────────────────────────────────────
+// ── UI actions ────────────────────────────────────────────────────────────────
 function switchSym(sym) { initSym(sym, state.tf); }
 function switchTF(tf)   { initSym(state.sym, tf); }
+
 function switchExchange(name, btn) {
   state.exchange = name;
   document.querySelectorAll('#exch-group .pill-btn').forEach(b => b.classList.remove('active', 'sym-active'));
@@ -560,15 +657,8 @@ function switchExchange(name, btn) {
   initSym(state.sym, state.tf);
 }
 
-function setDirection(dir) {
-  state.currentDir = dir;
-  computeAndRender();
-}
-
-function setRRRatio(v) {
-  state.rrRatio = +v || 2;
-  computeAndRender();
-}
+function setDirection(dir) { state.currentDir = dir; computeAndRender(); }
+function setRRRatio(v)     { state.rrRatio = +v || 2; computeAndRender(); }
 
 function toggleOverlay(key, btn) {
   if (key === 'fib') state.overlayFib = !state.overlayFib;
@@ -584,7 +674,6 @@ function toggleTheme() {
   _lwcChart?.setTheme(state.isDark ? 'dark' : 'light');
   const btn = document.querySelector('.theme-btn');
   if (btn) btn.textContent = state.isDark ? '🌙' : '☀️';
-  drawAll();
 }
 
 function toggleCard(id) {
@@ -609,15 +698,12 @@ function addAlert() {
   if (Notification?.permission === 'default') Notification.requestPermission();
 }
 
-function deleteAlert(id) {
-  state.alerts = state.alerts.filter(a => a.id !== id);
-  renderAlerts();
-}
+function deleteAlert(id) { state.alerts = state.alerts.filter(a => a.id !== id); renderAlerts(); }
 
 function toggleAlertDir() {
   state.alertDir = state.alertDir === 'above' ? 'below' : 'above';
   const btn = document.getElementById('alrt-dir-btn');
-  if (btn) { btn.textContent = state.alertDir === 'above' ? 'Above ▲' : 'Below ▼'; }
+  if (btn) btn.textContent = state.alertDir === 'above' ? 'Above ▲' : 'Below ▼';
 }
 
 function checkAlerts(price) {
@@ -628,8 +714,7 @@ function checkAlerts(price) {
     if (hit) {
       a.triggered = true; fired = true;
       const msg = `🔔 ${a.sym}: ${a.dir === 'above' ? 'Crossed above' : 'Dropped below'} ${fmt(a.price)}`;
-      showToast(msg);
-      playBeep(880);
+      showToast(msg); playBeep(880);
       if (Notification?.permission === 'granted') new Notification('TradeAssist', { body: msg });
     }
   });
@@ -640,47 +725,51 @@ function renderAlerts() {
   const el = document.getElementById('alert-list');
   if (!el) return;
   if (!state.alerts.length) { el.innerHTML = '<div class="alert-empty">No alerts set</div>'; return; }
-  el.innerHTML = state.alerts.map(a => `<div class="alert-item${a.triggered?' triggered':''}">
-    <div class="alert-item-info">
-      <span class="alert-sym">${fmtSym(a.sym)}</span>
-      <span class="alert-cond">${a.dir === 'above' ? 'Above' : 'Below'}</span>
-      <span class="alert-price-val">${fmt(a.price)}</span>
-      ${a.triggered ? '<span class="alert-status">✓ TRIGGERED</span>' : ''}
-    </div>
-    <button class="alert-del" onclick="deleteAlert(${a.id})">×</button>
-  </div>`).join('');
+  el.innerHTML = state.alerts.map(a => `
+    <div class="alert-item${a.triggered ? ' triggered' : ''}">
+      <div class="alert-item-info">
+        <span class="alert-sym">${fmtSym(a.sym)}</span>
+        <span class="alert-cond">${a.dir === 'above' ? 'Above' : 'Below'}</span>
+        <span class="alert-price-val">${fmt(a.price)}</span>
+        ${a.triggered ? '<span class="alert-status">✓ TRIGGERED</span>' : ''}
+      </div>
+      <button class="alert-del" onclick="deleteAlert(${a.id})">×</button>
+    </div>`).join('');
 }
 
 // ── Watchlist ─────────────────────────────────────────────────────────────────
 function wlAdd() {
-  const v = document.getElementById('wl-inp')?.value.trim().toUpperCase().replace('/','');
+  const v = document.getElementById('wl-inp')?.value.trim().toUpperCase().replace('/', '');
   if (!v) return;
   const sym = v.endsWith('USDT') ? v : v + 'USDT';
   if (!state.watchlist.includes(sym)) { state.watchlist.push(sym); saveWatchlist(state.watchlist); renderWatchlist(); }
   document.getElementById('wl-inp').value = '';
 }
+
 function wlRemove(s) {
   state.watchlist = state.watchlist.filter(x => x !== s);
   saveWatchlist(state.watchlist); renderWatchlist();
 }
+
 function renderWatchlist() {
   const el = document.getElementById('wl-list');
   if (!el) return;
   if (!state.watchlist.length) { el.innerHTML = '<span class="wl-empty">No coins added</span>'; return; }
-  el.innerHTML = state.watchlist.map(s => `<div class="wl-chip" onclick="loadCoinFromScreener('${s}')">
-    <span>${fmtSym(s)}</span>
-    <button class="wl-chip-del" onclick="event.stopPropagation();wlRemove('${s}')">×</button>
-  </div>`).join('');
+  el.innerHTML = state.watchlist.map(s => `
+    <div class="wl-chip" onclick="loadCoinFromScreener('${s}')">
+      <span>${fmtSym(s)}</span>
+      <button class="wl-chip-del" onclick="event.stopPropagation();wlRemove('${s}')">×</button>
+    </div>`).join('');
 }
 
-// ── P&L Tracker ──────────────────────────────────────────────────────────────
+// ── P&L tracker ───────────────────────────────────────────────────────────────
 function logTrade(result) {
   state.tradeCount++;
   const profitEl = document.getElementById('fv-profit');
   const lossEl   = document.getElementById('fv-loss');
   const profit   = result === 'win'
-    ? +(profitEl?.textContent?.replace(/[$,]/g,'')) || 0
-    : -(+(lossEl?.textContent?.replace(/[$,]/g,''))  || 0);
+    ? +(profitEl?.textContent?.replace(/[$,]/g, '')) || 0
+    : -(+(lossEl?.textContent?.replace(/[$,]/g, '')) || 0);
   state.pnlTrades.push({
     n: state.tradeCount, time: new Date().toLocaleTimeString(),
     sym: state.sym, dir: state.currentDir === 'long' ? '▲ L' : '▼ S',
@@ -689,7 +778,9 @@ function logTrade(result) {
   renderPnL();
   showToast(result === 'win' ? `✓ Win: +$${Math.abs(profit).toFixed(2)}` : `✗ Loss: -$${Math.abs(profit).toFixed(2)}`);
 }
+
 function clearPnL() { state.pnlTrades = []; state.tradeCount = 0; renderPnL(); }
+
 function renderPnL() {
   const wins   = state.pnlTrades.filter(t => t.result === 'win').length;
   const losses = state.pnlTrades.filter(t => t.result === 'loss').length;
@@ -704,21 +795,27 @@ function renderPnL() {
   if (netEl) netEl.style.color = net >= 0 ? 'var(--green)' : 'var(--red)';
   const tbody = document.getElementById('pnl-tbody');
   if (!tbody) return;
-  if (!state.pnlTrades.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:12px;font-family:var(--mono);font-size:10px">No trades logged</td></tr>'; return; }
+  if (!state.pnlTrades.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:12px;font-family:var(--mono);font-size:10px">No trades logged</td></tr>';
+    return;
+  }
   tbody.innerHTML = [...state.pnlTrades].reverse().map(t => `<tr>
-    <td style="color:var(--text3)">${t.n}</td><td style="color:var(--text3)">${t.time}</td>
-    <td style="font-weight:700">${t.sym.replace('USDT','')}</td><td>${t.dir}</td>
-    <td class="${t.result==='win'?'pnl-win':'pnl-loss'}">${t.result==='win'?'WIN':'LOSS'}</td>
-    <td class="${t.pnl>=0?'pnl-win':'pnl-loss'}">${(t.pnl>=0?'+':'')+'$'+Math.abs(t.pnl).toFixed(2)}</td>
+    <td style="color:var(--text3)">${t.n}</td>
+    <td style="color:var(--text3)">${t.time}</td>
+    <td style="font-weight:700">${t.sym.replace('USDT', '')}</td>
+    <td>${t.dir}</td>
+    <td class="${t.result === 'win' ? 'pnl-win' : 'pnl-loss'}">${t.result === 'win' ? 'WIN' : 'LOSS'}</td>
+    <td class="${t.pnl >= 0 ? 'pnl-win' : 'pnl-loss'}">${(t.pnl >= 0 ? '+' : '') + '$' + Math.abs(t.pnl).toFixed(2)}</td>
   </tr>`).join('');
 }
+
 function exportPnL() {
   if (!state.pnlTrades.length) { showToast('No trades to export'); return; }
   const rows = ['#,Time,Symbol,Direction,Result,P&L'];
   state.pnlTrades.forEach(t => rows.push(`${t.n},${t.time},${t.sym},${t.dir},${t.result},${t.pnl.toFixed(2)}`));
   const a = Object.assign(document.createElement('a'), {
-    href: URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' })),
-    download: 'session_pnl_' + new Date().toISOString().slice(0,10) + '.csv',
+    href:     URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' })),
+    download: 'session_pnl_' + new Date().toISOString().slice(0, 10) + '.csv',
   });
   a.click();
 }
@@ -731,7 +828,7 @@ async function runScreener() {
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Scanning…'; }
   showProgress(true);
 
-  const coins = state.scrCoinList.length ? state.scrCoinList : SCR_DEFAULT_COINS;
+  const coins = state.scrCoinList?.length ? state.scrCoinList : SCR_DEFAULT_COINS;
   const tfs   = [...state.scrTFs];
   const exch  = state.scrExchange;
   const { batchFetchScreener } = await import('./services/exchange.js');
@@ -762,19 +859,19 @@ function renderScreenerTable() {
   if (!tbody) return;
   let rows = applyScreenerFilters(state.scrResults, state.scrFilter);
   rows = sortScreenerResults(rows, state.scrSortKey, state.scrSortAsc);
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="14" class="scr-empty">No results</td></tr>'; return; }
-  const top5 = new Set([...rows].sort((a,b)=>b.score-a.score).slice(0,5).map(r=>r.sym));
+  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="scr-empty">No results</td></tr>'; return; }
+  const top5 = new Set([...rows].sort((a, b) => b.score - a.score).slice(0, 5).map(r => r.sym));
   tbody.innerHTML = rows.map(r => {
     const chgCls   = r.chgPct >= 0 ? 'pos' : 'neg';
     const isTop5   = top5.has(r.sym);
     const rowStyle = isTop5 ? 'background:rgba(0,229,160,0.04);border-left:2px solid rgba(0,229,160,0.5)' : '';
-    const scoreCol = r.score>=75?'#00e5a0':r.score>=50?'#4da6ff':r.score>=30?'#ffb82e':'#3d4460';
+    const scoreCol = r.score >= 75 ? '#00e5a0' : r.score >= 50 ? '#4da6ff' : r.score >= 30 ? '#ffb82e' : '#3d4460';
     return `<tr style="${rowStyle}">
-      <td><span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}${isTop5?'⭐':''}</span></td>
+      <td><span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}${isTop5 ? '⭐' : ''}</span></td>
       <td class="scr-price">${fmt(r.price)}</td>
-      <td class="scr-chg ${chgCls}">${(r.chgPct>=0?'+':'')+r.chgPct.toFixed(2)+'%'}</td>
+      <td class="scr-chg ${chgCls}">${(r.chgPct >= 0 ? '+' : '') + r.chgPct.toFixed(2) + '%'}</td>
       <td><span class="signal-badge signal-${r.signal}">${r.signalLabel}</span></td>
-      <td class="scr-rsi">${r.rsi!==null?Math.round(r.rsi):'—'}</td>
+      <td class="scr-rsi">${r.rsi !== null ? Math.round(r.rsi) : '—'}</td>
       <td><div class="score-bar"><div class="score-track"><div class="score-fill" style="width:${r.score}%;background:${scoreCol}"></div></div><span style="font-size:9px;color:${scoreCol};font-family:var(--mono);font-weight:700;min-width:24px">${r.score}</span></div></td>
       <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${r.sym}')">Trade →</button></td>
     </tr>`;
@@ -782,9 +879,9 @@ function renderScreenerTable() {
 }
 
 function setScrFilter(filter) { state.scrFilter = filter; renderScreenerTable(); }
+
 function setScrTF(tf, btn) {
-  if (state.scrTFs.has(tf)) state.scrTFs.delete(tf);
-  else state.scrTFs.add(tf);
+  if (state.scrTFs.has(tf)) state.scrTFs.delete(tf); else state.scrTFs.add(tf);
   btn?.classList.toggle('active', state.scrTFs.has(tf));
 }
 
@@ -797,46 +894,94 @@ function toggleScrAuto() {
 
 function showProgress(show) {
   const el = document.getElementById('scr-progress');
-  if (el) el.classList.toggle('show', show);
+  if (el) el.style.display = show ? '' : 'none';
 }
 
 // ── Anchored VWAP ─────────────────────────────────────────────────────────────
-function anchorToSessionOpen() {
-  const all = [...state.candles, state.currentCandle].filter(Boolean);
-  if (!all.length) { showToast('No candle data'); return; }
+
+/**
+ * Finds the session-open candle index and sets the anchor.
+ * Also sets _anchorMode so initSym() re-applies it after symbol/TF switches.
+ * @param {boolean} silent - if true, suppresses the toast (used on auto re-apply)
+ */
+function _applySessionAnchor(silent = false) {
+  if (!state.candles.length) {
+    if (!silent) showToast('No candle data');
+    return;
+  }
+
   const today = new Date();
-  const dk = `${today.getUTCFullYear()}-${today.getUTCMonth()+1}-${today.getUTCDate()}`;
-  let idx = all.findIndex(c => {
+  const dk    = `${today.getUTCFullYear()}-${today.getUTCMonth() + 1}-${today.getUTCDate()}`;
+  let idx = state.candles.findIndex(c => {
     if (!c.t) return false;
     const d = new Date(c.t);
-    return `${d.getUTCFullYear()}-${d.getUTCMonth()+1}-${d.getUTCDate()}` === dk;
+    return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}` === dk;
   });
-  if (idx < 0) { showToast('Session open not in window'); return; }
-  state.anchorIdx = idx;
+  if (idx < 0) idx = 0;
+
+  state.anchorIdx  = idx;
+  state.avwapVals  = [];
+  state.avwapCumPV = 0;
+  state.avwapCumV  = 0;
   recomputeAvwap();
-  drawAll();
-  showToast('AVWAP anchored to session open');
+  _writeAvwapLabel();
+
+  if (!silent) {
+    showToast('AVWAP anchored' + (idx === 0 ? ' (oldest in window)' : ' to session open'));
+  }
 }
 
-function clearAnchor() {
-  state.anchorIdx = null; state.avwapVals = [];
-  const el = document.getElementById('avwap-val'); if (el) el.textContent = '—';
+export function anchorToSessionOpen() {
+  _anchorMode = 'session';
+  _applySessionAnchor(false);
   drawAll();
 }
 
+export function clearAnchor() {
+  _anchorMode      = null;
+  state.anchorIdx  = null;
+  state.avwapVals  = [];
+  state.avwapCumPV = 0;
+  state.avwapCumV  = 0;
+  _writeAvwapLabel();
+  drawAll();
+}
+
+/**
+ * Writes the avwap-val DOM element.
+ * Reads from _getLatestAvwap() — the single safe read-point.
+ * Called from: anchorToSessionOpen, clearAnchor, updateLegendLabels, drawLive.
+ */
+function _writeAvwapLabel() {
+  const el = document.getElementById('avwap-val');
+  if (!el) return;
+  const avwap = _getLatestAvwap();
+  if (avwap != null) {
+    el.textContent = fmt(avwap);
+    el.style.color = (state.livePrice && state.livePrice >= avwap) ? 'var(--green)' : 'var(--red)';
+  } else {
+    el.textContent = '\u2014';   // —
+    el.style.color = '';
+  }
+}
+
+/**
+ * Rebuilds state.avwapVals from state.candles[anchorIdx..] in full.
+ * Also resets and persists avwapCumPV/V so _appendAvwapBar stays O(1).
+ */
 function recomputeAvwap() {
   if (state.anchorIdx === null) return;
-  const all = [...state.candles, state.currentCandle].filter(Boolean);
-  const slice = all.slice(state.anchorIdx);
+  const slice = state.candles.slice(state.anchorIdx);
   let cumPV = 0, cumV = 0;
   state.avwapVals = slice.map(c => {
-    const tp = (c.h + c.l + c.c) / 3;
-    cumPV += tp * c.v; cumV += c.v;
+    const tp  = (c.h + c.l + c.c) / 3;
+    const vol = (c.v > 0) ? c.v : 0;
+    cumPV += tp * vol;
+    cumV  += vol;
     return cumV > 0 ? cumPV / cumV : c.c;
   });
-  const latest = state.avwapVals[state.avwapVals.length - 1];
-  const el = document.getElementById('avwap-val');
-  if (el && latest) { el.textContent = fmt(latest); el.style.color = state.livePrice >= latest ? 'var(--green)' : 'var(--red)'; }
+  state.avwapCumPV = cumPV;
+  state.avwapCumV  = cumV;
 }
 
 // ── Replay ────────────────────────────────────────────────────────────────────
@@ -844,13 +989,18 @@ async function replayLoad() {
   const btn = document.getElementById('replay-load-btn');
   if (btn) { btn.textContent = '⏳ Loading…'; btn.disabled = true; }
   const res = await fetchKlinesFallback(state.sym, state.tf);
-  if (!res?.candles?.length) { showToast('Failed to load replay data'); if (btn) { btn.textContent = '⬇ Load'; btn.disabled = false; } return; }
-  state.replayData = res.candles;
-  state.replayIdx  = 0;
+  if (!res?.candles?.length) {
+    showToast('Failed to load replay data');
+    if (btn) { btn.textContent = '⬇ Load'; btn.disabled = false; }
+    return;
+  }
+  state.replayData   = res.candles;
+  state.replayIdx    = 0;
   state.replayActive = false;
   clearInterval(state.timers.replayTimer); state.timers.replayTimer = null;
   klineWs?.close(); tradeStream?.close();
   resetCandleState();
+  _ensureAvwapState();
   setConnStatus('warn', `Replay · ${res.candles.length} candles · ${fmtSym(state.sym)}`);
   document.getElementById('replay-play-btn').disabled = false;
   document.getElementById('replay-play-btn').textContent = '▶ Play';
@@ -896,6 +1046,7 @@ function replayReset() {
   clearTimeout(state.timers.replayTimer); state.timers.replayTimer = null;
   state.replayIdx = 0;
   resetCandleState();
+  _ensureAvwapState();
   const btn = document.getElementById('replay-play-btn');
   if (btn) { btn.textContent = '▶ Play'; btn.classList.remove('active'); }
   document.getElementById('replay-progress-lbl').textContent = `0 / ${state.replayData.length}`;
@@ -906,14 +1057,14 @@ function replayReset() {
 // ── Audio ─────────────────────────────────────────────────────────────────────
 function playBeep(freq) {
   try {
-    const ctx2 = new (window.AudioContext || window.webkitAudioContext)();
-    const osc  = ctx2.createOscillator();
-    const gain = ctx2.createGain();
-    osc.connect(gain); gain.connect(ctx2.destination);
+    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
     osc.type = 'sine'; osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.3, ctx2.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx2.currentTime + 0.6);
-    osc.start(); osc.stop(ctx2.currentTime + 0.6);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+    osc.start(); osc.stop(ctx.currentTime + 0.6);
   } catch(e) {}
 }
 function playCrossSound(type) { playBeep(type === 'bull' ? 660 : 440); }
@@ -927,35 +1078,21 @@ export function showToast(msg, cls = '') {
 }
 window.showToast = showToast;
 
-// ── Chart Hover ───────────────────────────────────────────────────────────────
+// ── Chart hover ───────────────────────────────────────────────────────────────
 function setupChartHover() {
-  const canvas = document.getElementById('c-price');
-  if (!canvas) return;
-  canvas.addEventListener('mousemove', (e) => {
-    const all = [...state.candles, state.currentCandle].filter(Boolean);
-    const vis = all.slice(-70);
-    const rect = canvas.getBoundingClientRect();
-    const x    = e.clientX - rect.left;
-    const n    = vis.length;
-    const cw   = (canvas.clientWidth - 68) / n;
-    const idx  = Math.round((x - 2) / cw);
-    state.hoverIdx = Math.max(0, Math.min(n - 1, idx));
-    drawAll();
-  });
-  canvas.addEventListener('mouseleave', () => { state.hoverIdx = -1; drawAll(); });
+  // LWCChart manages hover internally via subscribeCrosshairMove.
 }
 
-// ── Keyboard Shortcuts ────────────────────────────────────────────────────────
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
 function handleKeyDown(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   const k = e.key.toUpperCase();
-  if (k === 'L') { state.currentDir = 'long';  computeAndRender(); showToast('Direction: LONG'); }
+  if (k === 'L') { state.currentDir = 'long';  computeAndRender(); showToast('Direction: LONG');  }
   if (k === 'S') { state.currentDir = 'short'; computeAndRender(); showToast('Direction: SHORT'); }
   if (k === 'R') runScreener();
   if (k === 'T') toggleTheme();
-  // F key removed: LWC toolbar handles fib drawing natively
-  if (k === 'V') { state.overlayVP  = !state.overlayVP;  drawAll(); }
-  if (k === '[') { state.rrRatio = Math.max(1, state.rrRatio - 0.5);  setRRRatio(state.rrRatio); }
+  if (k === 'V') { state.overlayVP = !state.overlayVP; drawAll(); }
+  if (k === '[') { state.rrRatio = Math.max(1,  state.rrRatio - 0.5); setRRRatio(state.rrRatio); }
   if (k === ']') { state.rrRatio = Math.min(10, state.rrRatio + 0.5); setRRRatio(state.rrRatio); }
   if (k === 'A') anchorToSessionOpen();
   if (k === 'X') clearAnchor();

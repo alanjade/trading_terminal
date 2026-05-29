@@ -343,23 +343,27 @@
             <label class="fut-lbl">Capital</label>
             <div class="fut-input-group">
               <span class="fut-prefix">$</span>
-              <input id="inp-capital" class="input-field" type="number" value="100" min="1" placeholder="100" />
+              <input id="inp-capital" class="input-field" type="number" value="100" min="1" placeholder="100"
+                oninput="window.computeAndRender?.()" />
             </div>
           </div>
           <div class="fut-input-row">
             <label class="fut-lbl">Margin</label>
             <div class="fut-input-group">
               <span class="fut-prefix">$</span>
-              <input id="inp-margin" class="input-field" type="number" value="20" min="1" placeholder="20" />
+              <input id="inp-margin" class="input-field" type="number" value="20" min="1" placeholder="20"
+                oninput="window.computeAndRender?.()" />
             </div>
           </div>
           <div class="fut-input-row">
             <label class="fut-lbl">Entry</label>
-            <input id="inp-entry" class="input-field" type="number" placeholder="Auto" />
+            <input id="inp-entry" class="input-field" type="number" placeholder="Auto"
+              oninput="window.computeAndRender?.()" />
           </div>
           <div class="fut-input-row">
             <label class="fut-lbl">Stop</label>
-            <input id="inp-stop" class="input-field" type="number" placeholder="Auto" />
+            <input id="inp-stop" class="input-field" type="number" placeholder="Auto"
+              oninput="window.computeAndRender?.()" />
           </div>
         </div>
 
