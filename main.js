@@ -310,6 +310,7 @@ function _appendAvwapBar(c) {
 // Safe single read-point for latest AVWAP value.
 function _getLatestAvwap() {
   if (!Array.isArray(state.avwapVals) || state.avwapVals.length === 0) return null;
+  console.log('[AVWAP getLatest] returning null — length:', state.avwapVals?.length, 'anchorIdx:', state.anchorIdx);
   const v = state.avwapVals[state.avwapVals.length - 1];
   return (v != null && !isNaN(v)) ? v : null;
 }
@@ -387,6 +388,7 @@ function computeAndRender() {
   updateRegimeUI(state.regime);
   updateStructureUI(state.swingPoints, state.structureEvents);
   updateLegendLabels();
+  _writeAvwapLabel(); 
   drawAll();
 }
 
@@ -956,6 +958,7 @@ function _writeAvwapLabel() {
   const el = document.getElementById('avwap-val');
   if (!el) return;
   const avwap = _getLatestAvwap();
+  console.log('[AVWAP label] value:', avwap, 'livePrice:', state.livePrice); // TEMP
   if (avwap != null) {
     el.textContent = fmt(avwap);
     el.style.color = (state.livePrice && state.livePrice >= avwap) ? 'var(--green)' : 'var(--red)';
@@ -972,6 +975,17 @@ function _writeAvwapLabel() {
 function recomputeAvwap() {
   if (state.anchorIdx === null) return;
   const slice = state.candles.slice(state.anchorIdx);
+  
+  // TEMP DIAGNOSTIC — remove after fixing
+  console.log('[AVWAP] anchorIdx:', state.anchorIdx, 
+              'candles total:', state.candles.length,
+              'slice length:', slice.length);
+  if (slice.length > 0) {
+    const c0 = slice[0];
+    console.log('[AVWAP] first candle:', JSON.stringify(c0));
+    console.log('[AVWAP] has volume?', c0.v, typeof c0.v);
+  }
+
   let cumPV = 0, cumV = 0;
   state.avwapVals = slice.map(c => {
     const tp  = (c.h + c.l + c.c) / 3;
@@ -980,10 +994,14 @@ function recomputeAvwap() {
     cumV  += vol;
     return cumV > 0 ? cumPV / cumV : c.c;
   });
+  
+  // TEMP DIAGNOSTIC
+  console.log('[AVWAP] avwapVals length:', state.avwapVals.length, 
+              'last value:', state.avwapVals[state.avwapVals.length - 1]);
+  
   state.avwapCumPV = cumPV;
   state.avwapCumV  = cumV;
 }
-
 // ── Replay ────────────────────────────────────────────────────────────────────
 async function replayLoad() {
   const btn = document.getElementById('replay-load-btn');

@@ -72,27 +72,32 @@ export function scoreEntryQuality({
   if (avwap != null) {
     const distPct = Math.abs(price - avwap) / avwap * 100;
 
-    if (dir === 'long') {
-      if (price > avwap) {
-        score += 10;
-        factors.push('Price above session AVWAP');
-      } else {
-        score -= 5;
-        factors.push('Below AVWAP — anchored resistance');
-      }
-      // Bonus: price pulling back tightly to AVWAP = high-quality bounce zone
-      if (distPct < 0.3 && price >= avwap) {
+   if (dir === 'long') {
+    if (price > avwap) {
+      score += 10;
+      factors.push('Price above session AVWAP');
+      // Bonus only fires when price is already confirmed above AVWAP
+      if (distPct < 0.3) {
         score += 5;
         factors.push('At AVWAP — institutional mean reversion zone');
       }
     } else {
-      if (price < avwap) {
-        score += 10;
-        factors.push('Price below session AVWAP');
-      } else {
-        score -= 5;
-        factors.push('Above AVWAP — anchored support');
+      score -= 5;
+      factors.push('Below AVWAP — anchored resistance');
+      // No bonus possible here — price is below the level
+    }
+  } else {
+    if (price < avwap) {
+      score += 10;
+      factors.push('Price below session AVWAP');
+      if (distPct < 0.3) {
+        score += 5;
+        factors.push('At AVWAP — institutional rejection zone');
       }
+    } else {
+      score -= 5;
+      factors.push('Above AVWAP — anchored support');
+    }
       // Bonus: price rejecting at AVWAP from below
       if (distPct < 0.3 && price <= avwap) {
         score += 5;
