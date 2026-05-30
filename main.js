@@ -7,17 +7,43 @@ import { detectSwingPoints, detectStructureBreaks, getSessionLevels } from './in
 import { computeSuggestion, scoreEntryQuality, computeEntryZones, computePartialTPs, calcAtrPositionSize } from './engine/signals.js';
 import { calcFuturesMetrics, calcRiskBasedSize, calcATRStop, calcATRTrailStop, calcDailyGoal, suggestLeverage } from './engine/risk.js';
 import { initRenderer, scheduleRender, cancelPendingRender, RenderPriority } from './engine/renderer.js';
-import { KlineWebSocket, TradeStream, fetchKlines, fetchKlinesFallback } from './services/exchange.js';
-import { analyseSymbol, applyScreenerFilters, sortScreenerResults, detectSectorRotation, SCR_DEFAULT_COINS, SCR_CURATED_TIERS } from './services/screener.js';
+import { KlineWebSocket, TradeStream, fetchKlines, fetchKlinesFallback, batchFetchScreener } from './services/exchange.js';
+import { analyseSymbol, calcTFSnapshot, applyScreenerFilters, sortScreenerResults, detectSectorRotation, SCR_DEFAULT_COINS, SCR_CURATED_TIERS } from './services/screener.js';
 import { initJournal, openJournalEntry, saveJournalEntry, renderJournalList, renderJournalStats, exportJournal, deleteJournalTrade, editJournalTrade } from './components/journal.js';
 import { LWCChart } from './charts/lwc.js';
 import { backtesterHTML, btRun, btCompare, btExport, initBacktester } from './components/backtester.js';
 import * as dom from './ui/dom.js';
 
-// ── Module-level chart reference ──────────────────────────────────────────────
 let _lwcChart = null;
 
-// ── Global exports (called from inline HTML onclick / oninput) ────────────────
+const SCR_COINS_DEFAULT = SCR_DEFAULT_COINS;
+const SCR_COINS_CURATED = [
+  'BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','TRXUSDT','TONUSDT','LINKUSDT',
+  'AVAXUSDT','SUIUSDT','APTUSDT','NEARUSDT','ARBUSDT','OPUSDT','POLUSDT','RENDERUSDT','SEIUSDT','HYPEUSDT',
+  'INJUSDT','TIAUSDT','KASUSDT','ICPUSDT','HBARUSDT','VETUSDT','FILUSDT','ATOMUSDT','ALGOUSDT','XLMUSDT',
+  'FETUSDT','TAOUSDT','AKTUSDT','OCEANUSDT','AGIXUSDT','AIOZUSDT','WLDUSDT','ARKMUSDT','PHAUSDT','NMRUSDT',
+  'PEPEUSDT','SHIBUSDT','BONKUSDT','FLOKIUSDT','WIFUSDT','BRETTUSDT','POPCATUSDT','MOGUSDT','TURBOUSDT','BOMEUSDT',
+  'UNIUSDT','AAVEUSDT','MKRUSDT','CRVUSDT','LDOUSDT','PENDLEUSDT','ENAUSDT','JUPUSDT','RAYUSDT','SUSHIUSDT',
+  'IMXUSDT','GALAUSDT','SANDUSDT','MANAUSDT','AXSUSDT','BEAMUSDT','RONUSDT','ENJUSDT','ILVUSDT','PIXELUSDT',
+  'DOTUSDT','FTMUSDT','MNTUSDT','ZKUSDT','STRKUSDT','RUNEUSDT','QNTUSDT','EOSUSDT','XTZUSDT','KAVAUSDT',
+  'OKBUSDT','CROUSDT','BGBUSDT','KCSUSDT','HTUSDT',
+  'ORDIUSDT','SATSUSDT','PYTHUSDT','WUSDT','DYMUSDT','ZETAUSDT','AEVOUSDT','ETHFIUSDT','BLURUSDT','PORTALUSDT',
+  'JASMYUSDT','THETAUSDT','NEOUSDT','CHZUSDT','COMPUSDT',
+].filter((v, i, a) => a.indexOf(v) === i);
+
+const TF_ORDER = ['1m','3m','5m','15m','30m','1h','4h','1d'];
+
+let scrListMode  = 'default';
+let scrCoinList  = [...SCR_COINS_DEFAULT];
+let scrExchange  = 'bybit';
+let scrTFs       = ['5m','15m','1h','4h'];
+let scrFilter    = 'all';
+let scrSortKey   = 'score';
+let scrSortAsc   = false;
+let scrRunning   = false;
+let scrResults   = [];
+let scrAutoTimer = null;
+
 Object.assign(window, {
   state,
   fmt, fmtSym, fmtK,
@@ -26,19 +52,17 @@ Object.assign(window, {
   addAlert, deleteAlert, toggleAlertDir, wlAdd, wlRemove,
   logTrade, clearPnL, exportPnL,
   toggleOverlay, toggleTheme, setRRRatio, setDirection,
-  runScreener, toggleScrAuto, setScrFilter, setScrTF,
+  runScreener, toggleScrAuto,
+  scrSetFilter, scrSort,
+  scrSetListMode, scrFetchTopCoins, scrAddCustomCoin, scrResetCoins,
+  setScrTF,
   anchorToSessionOpen, clearAnchor, replayLoad, replayToggle, replayStep, replayReset,
   openJournalEntry,
   btRun, btCompare, btExport,
   computeAndRender,
   renderScreenerTable,
-  clearScreenerFilter: () => {
-    const el = dom.el['scr-text-filter'];
-    if (el) { el.value = ''; el.dispatchEvent(new Event('input')); }
-  },
 });
 
-// ── Constants ─────────────────────────────────────────────────────────────────
 const FIB_CONFIGS = [
   { r: 0,     label: '0%',    col: 'rgba(255,255,255,0.15)' },
   { r: 0.236, label: '23.6%', col: 'rgba(255,184,46,0.5)'  },
@@ -48,73 +72,59 @@ const FIB_CONFIGS = [
   { r: 1,     label: '100%',  col: 'rgba(255,255,255,0.15)' },
 ];
 
-// ── WebSocket instances ───────────────────────────────────────────────────────
 let klineWs         = null;
 let tradeStream     = null;
 let indicatorWorker = null;
 let workerPending   = false;
 let workerQueue     = null;
+let _anchorMode     = null;
 
-// ── AVWAP anchor memory ───────────────────────────────────────────────────────
-let _anchorMode = null;
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
 export function init() {
-  // 1. Resolve all static DOM refs once
   dom.init();
 
-  // 2. Load persisted settings
   const saved    = loadSettings();
   state.sym      = saved?.sym      || 'BTCUSDT';
   state.tf       = saved?.tf       || '5m';
   state.exchange = saved?.exchange || 'bybit';
   state.watchlist = loadWatchlist();
 
-  // 3. Ensure AVWAP state fields exist
   _ensureAvwapState();
 
-  // 4. Seed leverage from DOM default
   const initLev = +(dom.el['lev-slider']?.value ?? 10);
   state.leverage = initLev;
   if (dom.el['lev-manual'])  dom.el['lev-manual'].value        = initLev;
   if (dom.el['lev-display']) dom.el['lev-display'].textContent = initLev + '×';
   if (dom.el['lev-slider'])  dom.el['lev-slider'].style.setProperty('--lev-pct', ((initLev - 1) / 99 * 100) + '%');
 
-  // 5. Restore collapsed state
   const collapsed = loadCollapsed();
   Object.entries(collapsed).forEach(([id, isCollapsed]) => {
     const el = document.getElementById(id);
     if (el && isCollapsed) el.classList.add('collapsed');
   });
 
-  // 6. Sub-system init
   initJournal();
   initIndicatorWorker();
 
-  // 7. LWC chart
   _lwcChart = new LWCChart('lwc-container', { theme: state.isDark ? 'dark' : 'light' });
 
-  // 8. Wire up render scheduler
   initRenderer({
     onFull:    computeAndRender,
     onPartial: computePartial,
     onLive:    renderLive,
   });
 
-  // 9. Start data feeds
   initSym(state.sym, state.tf);
 
-  // 10. Global event listeners
   document.addEventListener('keydown', handleKeyDown);
   window.addEventListener('resize', () => _lwcChart?._resize());
 
-  // 11. UI
   setupChartHover();
   renderWatchlist();
   renderAlerts();
   renderPnL();
 
-  // 12. Phase 9 — inject backtester card, then resolve its lazy DOM refs
+  _scrUpdateCoinCount();
+
   const btSlot = dom.el['bt-placeholder'];
   if (btSlot) btSlot.outerHTML = backtesterHTML();
   initBacktester();
@@ -128,7 +138,6 @@ function _ensureAvwapState() {
   if (state.anchorIdx === undefined)           state.anchorIdx  = null;
 }
 
-// ── Symbol / TF init ──────────────────────────────────────────────────────────
 export async function initSym(sym, tf) {
   state.sym = sym;
   state.tf  = tf;
@@ -143,7 +152,6 @@ export async function initSym(sym, tf) {
 
   cancelPendingRender();
 
-  // Highlight active pills — read once per switch (not hot path)
   document.querySelectorAll('#sym-group .pill-btn').forEach(b => {
     b.classList.remove('active', 'sym-active');
     const m = b.getAttribute('onclick')?.match(/'([A-Z]+)'/);
@@ -207,7 +215,6 @@ export async function initSym(sym, tf) {
   saveSettings();
 }
 
-// ── Candle state update ───────────────────────────────────────────────────────
 function addCandleToState(c) {
   if (state.candles.length > 0 && c.t) {
     const last = state.candles[state.candles.length - 1].t;
@@ -322,7 +329,6 @@ function _getLatestAvwap() {
   return (v != null && !isNaN(v)) ? v : null;
 }
 
-// ── FULL render ───────────────────────────────────────────────────────────────
 function computeAndRender() {
   const all = [...state.candles, state.currentCandle].filter(Boolean);
   const atr = calcATR(all, 14);
@@ -336,7 +342,6 @@ function computeAndRender() {
 
   state.sessionLevels = getSessionLevels(all);
 
-  // Gather all writes, flush together
   dom.batch(() => {
     _computeSignalsAndUI(all, atr);
     updateRegimeUI(state.regime);
@@ -346,29 +351,23 @@ function computeAndRender() {
   drawAll();
 }
 
-// ── PARTIAL render ────────────────────────────────────────────────────────────
 function computePartial() {
   const all = [...state.candles, state.currentCandle].filter(Boolean);
   const atr = calcATR(all, 14);
-
   dom.batch(() => _computeSignalsAndUI(all, atr));
   drawAll();
 }
 
-// ── LIVE render ───────────────────────────────────────────────────────────────
 function renderLive() {
-  // Price display is hot — update directly without batch overhead
   updatePriceDisplay();
   drawLive();
 }
 
-// ── Shared: signals + all UI writes (runs inside dom.batch) ──────────────────
 function _computeSignalsAndUI(all, atr) {
   const latestRSI   = state.rsiVals[state.rsiVals.length - 1];
   const latestVwap  = state.vwapVals[state.vwapVals.length - 1];
   const latestAvwap = _getLatestAvwap();
 
-  // Read all input values in one pass (reads before any writes)
   const capital  = +(dom.el['inp-capital']?.value)  || 100;
   const margin   = +(dom.el['inp-margin']?.value)   || 20;
   const entryRaw = dom.el['inp-entry']?.value;
@@ -408,7 +407,6 @@ function _computeSignalsAndUI(all, atr) {
     dir: state.currentDir, rrRatio: state.rrRatio, feeType: state.feeType,
   });
 
-  // All writes happen here — inside the batch callback
   updateSuggestionUI(sug, quality, tps, trailStop, atrSize);
   updateFuturesUI(futMetrics, leverage, entry);
   updateEntryZonesUI(zones);
@@ -416,7 +414,6 @@ function _computeSignalsAndUI(all, atr) {
   _writeAvwapLabel();
 }
 
-// ── Chart draw (full dataset) ─────────────────────────────────────────────────
 function drawAll() {
   if (!_lwcChart) return;
   _lwcChart.setData(state.candles, {
@@ -436,7 +433,6 @@ function drawAll() {
   }
 }
 
-// ── Live candle paint ─────────────────────────────────────────────────────────
 function drawLive() {
   if (!_lwcChart || !state.currentCandle) return;
 
@@ -446,8 +442,8 @@ function drawLive() {
   c._liveCvd  = state.cvdVals[state.cvdVals.length - 1];
 
   if (state.anchorIdx !== null && state.avwapCumV > 0) {
-    const tp  = (c.h + c.l + c.c) / 3;
-    const vol = c.v > 0 ? c.v : 0;
+    const tp    = (c.h + c.l + c.c) / 3;
+    const vol   = c.v > 0 ? c.v : 0;
     const liveV = state.avwapCumV + vol;
     c._liveAvwap = liveV > 0 ? (state.avwapCumPV + tp * vol) / liveV : null;
   }
@@ -456,7 +452,6 @@ function drawLive() {
   _writeAvwapLabel();
 }
 
-// ── Indicator web-worker ──────────────────────────────────────────────────────
 function initIndicatorWorker() {
   try {
     indicatorWorker = new Worker('./workers/indicator.worker.js');
@@ -485,7 +480,6 @@ function onWorkerResult(data) {
   scheduleRender(RenderPriority.PARTIAL);
 }
 
-// ── Trade tick (order-flow delta) ─────────────────────────────────────────────
 function processTradeTick({ price, qty, side }) {
   if (side === 'buy') { state.tradeStreamDelta += qty; state.tradeBuyVol  += qty; }
   else                { state.tradeStreamDelta -= qty; state.tradeSellVol += qty; }
@@ -494,8 +488,6 @@ function processTradeTick({ price, qty, side }) {
   if (state.tradeTickBuf.length > 50) state.tradeTickBuf.shift();
   updateDeltaTicker();
 }
-
-// ── DOM updaters — all use cached refs, no getElementById ─────────────────────
 
 function updatePriceDisplay() {
   const priceEl  = dom.el['live-price'];
@@ -507,10 +499,7 @@ function updatePriceDisplay() {
 
   if (priceEl.textContent !== formatted) {
     priceEl.textContent = formatted;
-    if (prev) {
-      // Use dom.flashPrice — no forced reflow (replaces void el.offsetWidth)
-      dom.flashPrice(priceEl, state.livePrice >= prev ? 'up' : 'down');
-    }
+    if (prev) dom.flashPrice(priceEl, state.livePrice >= prev ? 'up' : 'down');
   }
   state.prevLivePrice = state.livePrice;
 
@@ -553,7 +542,7 @@ function updateRegimeUI(regime) {
     choppy:   'regime-choppy',
   };
   const cls = 'regime-badge ' + (typeMap[regime.type] || '');
-  if (el.className !== cls)      el.className   = cls;
+  if (el.className !== cls)            el.className   = cls;
   if (el.textContent !== regime.label) el.textContent = regime.label;
   dom.setText(dom.el['regime-advice'], regime.advice || '');
   dom.setText(dom.el['regime-adx'],    regime.adx?.toFixed(1) ?? '—');
@@ -647,7 +636,6 @@ function updateFuturesUI(metrics, leverage, entry) {
   }
 }
 
-// Takes pre-computed values to avoid re-reading state inside the batch
 function updateLegendLabels(vwap, cvd) {
   dom.setText(dom.el['leg-e9'],   state.e9  ? fmt(state.e9)  : '—');
   dom.setText(dom.el['leg-e20'],  state.e20 ? fmt(state.e20) : '—');
@@ -672,10 +660,8 @@ function updateDeltaTicker() {
 
   const netEl = dom.el['delta-net'];
   if (netEl) {
-    const netTxt = (net >= 0 ? '+' : '') + fmtK(net);
-    const netCol = net >= 0 ? 'var(--green)' : 'var(--red)';
-    dom.setText(netEl, netTxt);
-    dom.setStyle(netEl, 'color', netCol);
+    dom.setText(netEl, (net >= 0 ? '+' : '') + fmtK(net));
+    dom.setStyle(netEl, 'color', net >= 0 ? 'var(--green)' : 'var(--red)');
   }
 
   const bar = dom.el['delta-ratio-bar'];
@@ -685,12 +671,12 @@ function updateDeltaTicker() {
   }
 }
 
-// ── UI actions ────────────────────────────────────────────────────────────────
 function switchSym(sym) { initSym(sym, state.tf); }
 function switchTF(tf)   { initSym(state.sym, tf); }
 
 function switchExchange(name, btn) {
   state.exchange = name;
+  scrExchange    = name;
   document.querySelectorAll('#exch-group .pill-btn').forEach(b => b.classList.remove('active', 'sym-active'));
   btn.classList.add('active', 'sym-active');
   initSym(state.sym, state.tf);
@@ -727,7 +713,6 @@ function loadCoinFromScreener(sym) {
   document.querySelector('.chart-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// ── Alerts ────────────────────────────────────────────────────────────────────
 function addAlert() {
   const price = +(dom.el['alrt-price']?.value);
   if (!price) return;
@@ -776,7 +761,6 @@ function renderAlerts() {
     </div>`).join('');
 }
 
-// ── Watchlist ─────────────────────────────────────────────────────────────────
 function wlAdd() {
   const v = dom.el['wl-inp']?.value.trim().toUpperCase().replace('/', '');
   if (!v) return;
@@ -801,10 +785,8 @@ function renderWatchlist() {
     </div>`).join('');
 }
 
-// ── P&L tracker ───────────────────────────────────────────────────────────────
 function logTrade(result) {
   state.tradeCount++;
-  // Read current display values from cached refs
   const profitEl = dom.el['fv-profit'];
   const lossEl   = dom.el['fv-loss'];
   const profit   = result === 'win'
@@ -861,55 +843,239 @@ function exportPnL() {
   a.click();
 }
 
-// ── Screener ──────────────────────────────────────────────────────────────────
+function _scrUpdateCoinCount() {
+  const el = document.getElementById('scr-coin-count');
+  if (el) el.textContent = `${scrCoinList.length} coins`;
+}
+
+function scrSetFilter(filter, btn) {
+  scrFilter = filter;
+  document.querySelectorAll('.scr-filter-btn').forEach(b => b.classList.remove('active'));
+  if (btn) {
+    btn.classList.add('active');
+  } else {
+    document.querySelector(`.scr-filter-btn[onclick*="'${filter}'"]`)?.classList.add('active');
+  }
+  renderScreenerTable();
+}
+
+function scrSort(key) {
+  if (scrSortKey === key) scrSortAsc = !scrSortAsc;
+  else { scrSortKey = key; scrSortAsc = false; }
+  const headers = ['sym','price','chg','signal','rsi','score','stack','mtf','vol','dist','hlpos','age'];
+  const ths = document.querySelectorAll('#scr-table th');
+  ths.forEach(th => th.classList.remove('sort-asc', 'sort-desc'));
+  const idx = headers.indexOf(key);
+  if (idx >= 0 && ths[idx]) ths[idx].classList.add(scrSortAsc ? 'sort-asc' : 'sort-desc');
+  renderScreenerTable();
+}
+
+function setScrTF(tf, btn) {
+  const idx = scrTFs.indexOf(tf);
+  if (idx >= 0) {
+    if (scrTFs.length === 1) { showToast('Select at least one TF'); return; }
+    scrTFs.splice(idx, 1);
+  } else {
+    scrTFs.push(tf);
+    scrTFs.sort((a, b) => TF_ORDER.indexOf(a) - TF_ORDER.indexOf(b));
+  }
+  btn?.classList.toggle('active', scrTFs.includes(tf));
+}
+
+function scrSetListMode(mode, btn) {
+  scrListMode = mode;
+  scrCoinList = mode === 'curated' ? [...SCR_COINS_CURATED] : [...SCR_COINS_DEFAULT];
+  _scrUpdateCoinCount();
+  document.querySelectorAll('.scr-list-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const legend = document.getElementById('scr-tier-legend');
+  if (legend) legend.style.display = mode === 'curated' ? 'flex' : 'none';
+}
+
+function scrAddCustomCoin() {
+  const inp = document.getElementById('scr-coin-inp');
+  if (!inp) return;
+  const raw = inp.value.trim().toUpperCase();
+  if (!raw) return;
+  const coin = raw.includes('USDT') ? raw : raw + 'USDT';
+  if (scrCoinList.includes(coin)) { showToast(`${coin} already in list`); inp.value = ''; return; }
+  scrCoinList.unshift(coin);
+  _scrUpdateCoinCount();
+  showToast(`✓ Added ${coin} (${scrCoinList.length} total)`);
+  inp.value = '';
+}
+
+function scrResetCoins() {
+  scrCoinList = scrListMode === 'curated' ? [...SCR_COINS_CURATED] : [...SCR_COINS_DEFAULT];
+  _scrUpdateCoinCount();
+  showToast(`Reset to ${scrCoinList.length} ${scrListMode === 'curated' ? 'curated' : 'default'} coins`);
+}
+
+async function scrFetchTopCoins(n, btn) {
+  const fetchAll = (n === null || n === undefined);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  const origText = fetchAll ? 'ALL' : `${n}`;
+  try {
+    let symbols = [];
+    const blocked = /UP|DOWN|BULL|BEAR|3L|3S|5L|5S|2L|2S|USDC|BUSD|TUSD|USDP|DAI|UST|FRAX|GUSD/;
+
+    if (scrExchange === 'bybit') {
+      const r = await fetch('https://api.bybit.com/v5/market/tickers?category=linear', { signal: AbortSignal.timeout(15000) });
+      const d = await r.json();
+      let filtered = (d?.result?.list || [])
+        .filter(t => t.symbol.endsWith('USDT') && !blocked.test(t.symbol))
+        .sort((a, b) => +b.turnover24h - +a.turnover24h);
+      if (!fetchAll) filtered = filtered.slice(0, n);
+      symbols = filtered.map(t => t.symbol);
+
+    } else if (scrExchange === 'okx') {
+      const r = await fetch('https://www.okx.com/api/v5/market/tickers?instType=SWAP', { signal: AbortSignal.timeout(15000) });
+      const d = await r.json();
+      let filtered = (d?.data || [])
+        .filter(t => t.instId.endsWith('-USDT-SWAP') && !blocked.test(t.instId))
+        .sort((a, b) => +b.volCcy24h - +a.volCcy24h);
+      if (!fetchAll) filtered = filtered.slice(0, n);
+      symbols = filtered.map(t => t.instId.replace('-USDT-SWAP', '') + 'USDT');
+
+    } else {
+      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error('fapi ' + r.status);
+      const d = await r.json();
+      let filtered = d
+        .filter(t => t.symbol.endsWith('USDT') && !blocked.test(t.symbol))
+        .sort((a, b) => +b.quoteVolume - +a.quoteVolume);
+      if (!fetchAll) filtered = filtered.slice(0, n);
+      symbols = filtered.map(t => t.symbol);
+    }
+
+    if (!symbols.length) throw new Error('No symbols returned');
+    const userAdded = scrCoinList.filter(s => !SCR_COINS_DEFAULT.includes(s) && !symbols.includes(s));
+    scrCoinList = [...new Set([...symbols, ...userAdded])];
+    _scrUpdateCoinCount();
+    const label = fetchAll ? 'ALL' : 'top ' + symbols.length;
+    showToast(`✓ Loaded ${label} coins from ${scrExchange} (${scrCoinList.length} total)`);
+
+  } catch (e) {
+    showToast(`❌ Failed to fetch from ${scrExchange}: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+  }
+}
+
 async function runScreener() {
-  if (state.scrRunning) return;
-  state.scrRunning = true;
+  if (scrRunning) return;
+  scrRunning = true;
 
   const btn = dom.el['scr-run-btn'];
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Scanning…'; }
   dom.show(dom.el['scr-progress'], true);
 
-  const coins = state.scrCoinList?.length ? state.scrCoinList : SCR_DEFAULT_COINS;
-  const tfs   = [...state.scrTFs];
-  const exch  = state.scrExchange;
-  const { batchFetchScreener } = await import('./services/exchange.js');
+  const coins     = scrCoinList.length ? scrCoinList : SCR_DEFAULT_COINS;
+  const activeTFs = TF_ORDER.filter(t => scrTFs.includes(t));
+  const exch      = scrExchange;
 
-  const rawData = await batchFetchScreener(coins, tfs, exch, ({ done, total, sym }) => {
+  const rawData = await batchFetchScreener(coins, activeTFs, exch, ({ done, total, sym }) => {
     const pct = Math.round(done / total * 100);
     dom.setStyle(dom.el['scr-progress-bar'], 'width', pct + '%');
     dom.setText(dom.el['scr-progress-lbl'], `${done}/${total} — ${sym}`);
   });
 
-  state.scrResults = [];
-  rawData.forEach((tfData, sym) => {
-    const r = analyseSymbol(sym, tfData, tfs[0], Date.now(), exch);
-    if (r) state.scrResults.push(r);
+  scrResults = [];
+
+  rawData.forEach((tfCandles, sym) => {
+    const primaryTf = activeTFs.find(t => tfCandles[t]?.length >= 15);
+    if (!primaryTf) return;
+
+    const snapshotMap = {};
+    activeTFs.forEach(tf => {
+      const candles = tfCandles[tf];
+      if (!candles?.length) return;
+      const snap = calcTFSnapshot(candles, tf);
+      if (snap) snapshotMap[tf] = snap;
+    });
+
+    const r = analyseSymbol(
+      sym,
+      tfCandles[primaryTf],
+      primaryTf,
+      snapshotMap,
+      activeTFs,
+      Date.now(),
+      exch,
+    );
+
+    if (r) scrResults.push(r);
   });
 
   renderScreenerTable();
-  state.scrRunning = false;
-  if (btn) { btn.disabled = false; btn.textContent = '▶ Run'; }
+  scrRunning = false;
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Scan'; }
   dom.show(dom.el['scr-progress'], false);
-  showToast(`Screener done: ${state.scrResults.length} symbols`);
+  showToast(`Screener done: ${scrResults.length} symbols`);
 }
 
 function renderScreenerTable() {
   const tbody = dom.el['scr-tbody'];
   if (!tbody) return;
 
-  const textQ = dom.el['scr-text-filter']?.value.trim().toUpperCase() || '';
-  let rows = applyScreenerFilters(state.scrResults, state.scrFilter)
-    .filter(r => !textQ || r.sym.includes(textQ) || r.sym.replace('USDT','').includes(textQ));
-  rows = sortScreenerResults(rows, state.scrSortKey, state.scrSortAsc);
+  let rows = applyScreenerFilters(scrResults, scrFilter);
+  rows = sortScreenerResults(rows, scrSortKey, scrSortAsc);
 
-  if (!rows.length) { tbody.innerHTML = '<tr><td colspan="7" class="scr-empty">No results</td></tr>'; return; }
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="13" class="scr-empty">No results — run a scan first</td></tr>';
+    return;
+  }
+
+  const thead = document.querySelector('#scr-table thead tr');
+  if (thead && !thead.dataset.hintsApplied) {
+    const hints = [
+      ['sym',    'Symbol — click to trade'],
+      ['price',  'Last traded price'],
+      ['chg',    '24-hour price change %'],
+      ['signal', 'EMA 9/20/50 stack direction'],
+      ['rsi',    'RSI-14 momentum (>70 overbought, <30 oversold)'],
+      ['score',  'Composite setup quality score (0–100)'],
+      ['stack',  'EMA order: 9 vs 20 vs 50'],
+      ['mtf',    'Multi-timeframe confluence — agreeing TFs / total TFs'],
+      ['vol',    'Volume vs 20-bar average (🔥 ≥2x spike, ⚡ ≥1.5x hot)'],
+      ['dist',   '% distance of price from EMA20'],
+      ['hlpos',  'Price position within 24h high–low range'],
+      ['age',    'Candles elapsed since last EMA9/20 crossover'],
+    ];
+    const ths = thead.querySelectorAll('th');
+    hints.forEach(([key, tip], i) => {
+      if (ths[i]) {
+        ths[i].setAttribute('title', tip);
+        ths[i].style.cursor = 'pointer';
+      }
+    });
+    thead.dataset.hintsApplied = '1';
+  }
+
   const top5 = new Set([...rows].sort((a, b) => b.score - a.score).slice(0, 5).map(r => r.sym));
+
   tbody.innerHTML = rows.map(r => {
     const chgCls   = r.chgPct >= 0 ? 'pos' : 'neg';
     const isTop5   = top5.has(r.sym);
     const rowStyle = isTop5 ? 'background:rgba(0,229,160,0.04);border-left:2px solid rgba(0,229,160,0.5)' : '';
     const scoreCol = r.score >= 75 ? '#00e5a0' : r.score >= 50 ? '#4da6ff' : r.score >= 30 ? '#ffb82e' : '#3d4460';
+    const stackCol = r.bullStack ? '#00e5a0' : r.bearStack ? '#ff3d5a' : '#ffb82e';
+    const stackTxt = r.bullStack ? '9>20>50' : r.bearStack ? '9<20<50' : '⚠ MIX';
+    const volCol   = r.volSpike ? '#00e5a0' : r.volHot ? '#ffb82e' : 'var(--text2)';
+    const volBg    = r.volSpike ? 'rgba(0,229,160,0.10)' : r.volHot ? 'rgba(255,184,46,0.08)' : 'transparent';
+    const volIcon  = r.volSpike ? '🔥' : r.volHot ? '⚡' : '';
+    const volStr   = r.volRatio != null ? r.volRatio.toFixed(1) + 'x' : '—';
+    const distAbs  = r.e20dist != null ? Math.abs(r.e20dist) : null;
+    const distCol  = distAbs != null ? (distAbs <= 1 ? '#00e5a0' : distAbs > 5 ? '#ff3d5a' : 'var(--text2)') : 'var(--text2)';
+    const distStr  = distAbs != null ? (r.e20dist >= 0 ? '+' : '-') + distAbs.toFixed(1) + '%' : '—';
+    const hlPos    = r.hlPos ?? 50;
+    const hlBarCol = hlPos >= 80 ? '#ff3d5a' : hlPos <= 20 ? '#00e5a0' : '#4da6ff';
+    const hlLabel  = hlPos >= 80 ? 'High' : hlPos <= 20 ? 'Low' : Math.round(hlPos) + '%';
+    const mtfStr   = r.availTFs > 0 ? `${Math.max(r.bullCount, r.bearCount)}/${r.availTFs}` : '—';
+    const mtfCol   = r.mtfFull ? '#00e5a0' : r.mtfMost ? '#ffb82e' : 'var(--text2)';
+    const ageTxt   = r.trendAge != null ? r.trendAge + 'c' : '—';
+    const ageCol   = r.trendAge <= 3 ? '#00e5a0' : r.trendAge <= 10 ? '#ffb82e' : 'var(--text3)';
+
     return `<tr style="${rowStyle}">
       <td><span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}${isTop5 ? '⭐' : ''}</span></td>
       <td class="scr-price">${fmt(r.price)}</td>
@@ -917,31 +1083,36 @@ function renderScreenerTable() {
       <td><span class="signal-badge signal-${r.signal}">${r.signalLabel}</span></td>
       <td class="scr-rsi">${r.rsi !== null ? Math.round(r.rsi) : '—'}</td>
       <td><div class="score-bar"><div class="score-track"><div class="score-fill" style="width:${r.score}%;background:${scoreCol}"></div></div><span style="font-size:9px;color:${scoreCol};font-family:var(--mono);font-weight:700;min-width:24px">${r.score}</span></div></td>
+      <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${stackCol}">${stackTxt}</span></td>
+      <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${mtfCol}">${mtfStr}</span></td>
+      <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${volCol};background:${volBg};border-radius:6px;padding:1px 5px">${volStr}${volIcon}</span></td>
+      <td><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
+      <td>
+        <div style="position:relative;width:36px;height:6px;background:var(--bg3);border-radius:2px;display:inline-block">
+          <div style="position:absolute;left:0;top:0;height:100%;width:${hlPos}%;background:${hlBarCol};border-radius:2px"></div>
+        </div>
+        <span style="font-family:var(--mono);font-size:8px;color:${hlBarCol};margin-left:3px">${hlLabel}</span>
+      </td>
+      <td><span style="font-family:var(--mono);font-size:9px;color:${ageCol}">${ageTxt}</span></td>
       <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${r.sym}')">Trade →</button></td>
     </tr>`;
   }).join('');
 }
 
-function setScrFilter(filter) { state.scrFilter = filter; renderScreenerTable(); }
-
-function setScrTF(tf, btn) {
-  if (state.scrTFs.has(tf)) state.scrTFs.delete(tf); else state.scrTFs.add(tf);
-  btn?.classList.toggle('active', state.scrTFs.has(tf));
-}
-
-let scrAutoTimer = null;
 function toggleScrAuto() {
-  state.scrAutoOn = !state.scrAutoOn;
-  if (state.scrAutoOn) { runScreener(); scrAutoTimer = setInterval(runScreener, 60_000); }
-  else { clearInterval(scrAutoTimer); scrAutoTimer = null; }
+  if (scrAutoTimer) {
+    clearInterval(scrAutoTimer);
+    scrAutoTimer = null;
+    showToast('Auto-scan off');
+  } else {
+    runScreener();
+    scrAutoTimer = setInterval(runScreener, 5 * 60 * 1000);
+    showToast('Auto-scan: every 5 minutes');
+  }
 }
 
-// ── Anchored VWAP ─────────────────────────────────────────────────────────────
 function _applySessionAnchor(silent = false) {
-  if (!state.candles.length) {
-    if (!silent) showToast('No candle data');
-    return;
-  }
+  if (!state.candles.length) { if (!silent) showToast('No candle data'); return; }
 
   const today = new Date();
   const dk    = `${today.getUTCFullYear()}-${today.getUTCMonth() + 1}-${today.getUTCDate()}`;
@@ -959,16 +1130,10 @@ function _applySessionAnchor(silent = false) {
   recomputeAvwap();
   _writeAvwapLabel();
 
-  if (!silent) {
-    showToast('AVWAP anchored' + (idx === 0 ? ' (oldest in window)' : ' to session open'));
-  }
+  if (!silent) showToast('AVWAP anchored' + (idx === 0 ? ' (oldest in window)' : ' to session open'));
 }
 
-export function anchorToSessionOpen() {
-  _anchorMode = 'session';
-  _applySessionAnchor(false);
-  drawAll();
-}
+export function anchorToSessionOpen() { _anchorMode = 'session'; _applySessionAnchor(false); drawAll(); }
 
 export function clearAnchor() {
   _anchorMode      = null;
@@ -981,7 +1146,7 @@ export function clearAnchor() {
 }
 
 function _writeAvwapLabel() {
-  const el    = dom.el['avwap-val'];
+  const el = dom.el['avwap-val'];
   if (!el) return;
   const avwap = _getLatestAvwap();
   if (avwap != null) {
@@ -1008,7 +1173,6 @@ function recomputeAvwap() {
   state.avwapCumV  = cumV;
 }
 
-// ── Replay ────────────────────────────────────────────────────────────────────
 async function replayLoad() {
   const btn = dom.el['replay-load-btn'];
   if (btn) { btn.textContent = '⏳ Loading…'; btn.disabled = true; }
@@ -1038,10 +1202,7 @@ function replayToggle() {
   if (!state.replayData.length) { showToast('Load history first'); return; }
   state.replayActive = !state.replayActive;
   const btn = dom.el['replay-play-btn'];
-  if (btn) {
-    btn.textContent = state.replayActive ? '⏸ Pause' : '▶ Play';
-    btn.classList.toggle('active', state.replayActive);
-  }
+  if (btn) { btn.textContent = state.replayActive ? '⏸ Pause' : '▶ Play'; btn.classList.toggle('active', state.replayActive); }
   if (state.replayActive) replayTick();
 }
 
@@ -1081,7 +1242,6 @@ function replayReset() {
   showToast('Replay reset');
 }
 
-// ── Audio ─────────────────────────────────────────────────────────────────────
 function playBeep(freq) {
   try {
     const ctx  = new (window.AudioContext || window.webkitAudioContext)();
@@ -1094,9 +1254,9 @@ function playBeep(freq) {
     osc.start(); osc.stop(ctx.currentTime + 0.6);
   } catch(e) {}
 }
+
 function playCrossSound(type) { playBeep(type === 'bull' ? 660 : 440); }
 
-// ── Toast ─────────────────────────────────────────────────────────────────────
 export function showToast(msg, cls = '') {
   const t = dom.el['toast'];
   if (!t) return;
@@ -1105,12 +1265,8 @@ export function showToast(msg, cls = '') {
 }
 window.showToast = showToast;
 
-// ── Chart hover ───────────────────────────────────────────────────────────────
-function setupChartHover() {
-  // LWCChart manages hover internally via subscribeCrosshairMove.
-}
+function setupChartHover() {}
 
-// ── Keyboard shortcuts ────────────────────────────────────────────────────────
 function handleKeyDown(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   const k = e.key.toUpperCase();
@@ -1125,7 +1281,6 @@ function handleKeyDown(e) {
   if (k === 'X') clearAnchor();
 }
 
-// ── Auto-start ────────────────────────────────────────────────────────────────
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {

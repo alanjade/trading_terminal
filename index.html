@@ -199,7 +199,7 @@
   <!-- ── Centre Column ─────────────────────────────────────────────────────── -->
   <main class="col-center">
 
-    <!-- Price Chart — LWC container replaces 4 canvases -->
+    <!-- Price Chart -->
     <div id="card-chart" class="card chart-card">
       <div class="card-header" onclick="toggleCard('card-chart')">
         <span class="card-title">📈 Chart</span>
@@ -215,11 +215,6 @@
         </div>
       </div>
       <div class="card-body" style="padding:0">
-        <!--
-          Phase 7: Single LWC container replaces the four canvas elements.
-          The LWCChart class builds its own pane divs inside here.
-          Min-height matches sum of original canvas heights (320+70+44+60 + gaps).
-        -->
         <div id="lwc-container" style="width:100%;min-height:500px;position:relative"></div>
       </div>
     </div>
@@ -632,49 +627,111 @@
     <div class="card-header" onclick="toggleCard('card-screener')">
       <span class="card-title">🔍 Screener</span>
       <div style="display:flex;gap:6px;align-items:center">
-        <button id="scr-run-btn" class="btn btn--primary btn--icon" onclick="event.stopPropagation();runScreener()">▶ Run</button>
+        <button id="scr-run-btn" class="btn btn--primary btn--icon" onclick="event.stopPropagation();runScreener()">▶ Scan</button>
         <button class="btn btn--icon" onclick="event.stopPropagation();toggleScrAuto()" id="scr-auto-btn">Auto</button>
         <span class="card-chevron">▾</span>
       </div>
     </div>
     <div class="card-body">
-      <div class="scr-controls">
-        <div class="scr-tfs">
-          <span class="stat-lbl" style="margin-right:6px">TFs:</span>
-          <button class="pill-btn active" onclick="setScrTF('5m',this)">5m</button>
-          <button class="pill-btn active" onclick="setScrTF('15m',this)">15m</button>
-          <button class="pill-btn active" onclick="setScrTF('1h',this)">1h</button>
-          <button class="pill-btn active" onclick="setScrTF('4h',this)">4h</button>
-        </div>
-        <div class="pill-group">
-          <button class="pill-btn active" onclick="setScrFilter('all')">All</button>
-          <button class="pill-btn" onclick="setScrFilter('bull')">Bull</button>
-          <button class="pill-btn" onclick="setScrFilter('bear')">Bear</button>
-          <button class="pill-btn" onclick="setScrFilter('hot')">Hot 🔥</button>
-          <button class="pill-btn" onclick="setScrFilter('breakout')">Breakout</button>
+
+      <!-- Coin list controls -->
+      <div class="scr-list-controls" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px">
+        <span class="stat-lbl">List:</span>
+        <button class="pill-btn scr-list-btn active" onclick="scrSetListMode('default',this)">Default</button>
+        <button class="pill-btn scr-list-btn" onclick="scrSetListMode('curated',this)">Curated</button>
+        <span id="scr-coin-count" class="stat-lbl" style="margin-left:4px">— coins</span>
+        <div style="display:flex;gap:4px;margin-left:auto">
+          <input id="scr-coin-inp" class="input-field" placeholder="Add coin" style="width:90px;font-size:10px"
+            onkeydown="if(event.key==='Enter')scrAddCustomCoin()" />
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrAddCustomCoin()">+</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrResetCoins()">↺</button>
         </div>
       </div>
+
+      <!-- Fetch top coins -->
+      <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+        <span class="stat-lbl" style="line-height:24px">Fetch:</span>
+        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(50,this)">50</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(100,this)">100</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(200,this)">200</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(null,this)">ALL</button>
+      </div>
+
+      <!-- Tier legend (visible in curated mode) -->
+      <div id="scr-tier-legend" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+        <span class="stat-lbl" style="width:100%;margin-bottom:2px">Sectors:</span>
+        <span class="signal-badge" style="font-size:8px">T1 Top</span>
+        <span class="signal-badge" style="font-size:8px">T2 Major</span>
+        <span class="signal-badge" style="font-size:8px">AI</span>
+        <span class="signal-badge" style="font-size:8px">MEME</span>
+        <span class="signal-badge" style="font-size:8px">DeFi</span>
+        <span class="signal-badge" style="font-size:8px">Game</span>
+        <span class="signal-badge" style="font-size:8px">Infra</span>
+        <span class="signal-badge" style="font-size:8px">CEX</span>
+        <span class="signal-badge" style="font-size:8px">Scalp</span>
+        <span class="signal-badge" style="font-size:8px">Watch</span>
+      </div>
+
+      <!-- TF selector -->
+      <div class="scr-tfs" style="display:flex;align-items:center;gap:4px;margin-bottom:8px">
+        <span class="stat-lbl" style="margin-right:4px">TFs:</span>
+        <button class="pill-btn active" onclick="setScrTF('5m',this)">5m</button>
+        <button class="pill-btn active" onclick="setScrTF('15m',this)">15m</button>
+        <button class="pill-btn active" onclick="setScrTF('1h',this)">1h</button>
+        <button class="pill-btn active" onclick="setScrTF('4h',this)">4h</button>
+      </div>
+
+      <!-- Filter buttons — all keys matching applyScreenerFilters -->
+      <div class="scr-controls" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+        <button class="pill-btn scr-filter-btn active" onclick="scrSetFilter('all',this)">All</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('bull',this)">Bull</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('bear',this)">Bear</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('cross',this)">Cross</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('ob',this)">OB &gt;70</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('os',this)">OS &lt;30</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib',this)">Fib</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib618',this)">Fib 61.8</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib50',this)">Fib 50</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib382',this)">Fib 38.2</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib_sup',this)">Fib Sup</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib_res',this)">Fib Res</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('mtf_full',this)">MTF Full</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('mtf_most',this)">MTF Most</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('vol_spike',this)">Vol 🔥</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('near_ema',this)">Near EMA</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fresh',this)">Fresh</button>
+      </div>
+
+      <!-- Progress bar -->
       <div id="scr-progress" class="scr-progress" style="display:none">
         <div class="progress-track" style="margin-bottom:4px">
           <div id="scr-progress-bar" class="progress-bar" style="width:0%"></div>
         </div>
         <span id="scr-progress-lbl" class="stat-lbl">0/0</span>
       </div>
+
+      <!-- Results table — 13 columns matching renderScreenerTable -->
       <div class="scr-table-wrap">
-        <table class="scr-table">
+        <table id="scr-table" class="scr-table">
           <thead>
             <tr>
-              <th onclick="state.scrSortKey='sym';renderScreenerTable()">Symbol</th>
-              <th onclick="state.scrSortKey='price';renderScreenerTable()">Price</th>
-              <th onclick="state.scrSortKey='chgPct';renderScreenerTable()">Chg%</th>
-              <th onclick="state.scrSortKey='signal';renderScreenerTable()">Signal</th>
-              <th onclick="state.scrSortKey='rsi';renderScreenerTable()">RSI</th>
-              <th onclick="state.scrSortKey='score';state.scrSortAsc=false;renderScreenerTable()">Score ↓</th>
+              <th onclick="scrSort('sym')">Symbol</th>
+              <th onclick="scrSort('price')">Price</th>
+              <th onclick="scrSort('chg')">Chg%</th>
+              <th onclick="scrSort('signal')">Signal</th>
+              <th onclick="scrSort('rsi')">RSI</th>
+              <th onclick="scrSort('score')">Score ↓</th>
+              <th onclick="scrSort('stack')">Stack</th>
+              <th onclick="scrSort('mtf')">MTF</th>
+              <th onclick="scrSort('vol')">Vol</th>
+              <th onclick="scrSort('dist')">Dist</th>
+              <th onclick="scrSort('hlpos')">H/L</th>
+              <th onclick="scrSort('age')">Age</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="scr-tbody">
-            <tr><td colspan="7" class="scr-empty">Click Run to scan coins</td></tr>
+            <tr><td colspan="13" class="scr-empty">Click Scan to screen coins</td></tr>
           </tbody>
         </table>
       </div>
@@ -702,10 +759,7 @@
     </div>
   </div>
 
-  <!--
-    Phase 9: Backtester card slot.
-    Populated at runtime by backtesterHTML() called from init() in main.js.
-  -->
+  <!-- Backtester (populated at runtime by backtesterHTML()) -->
   <div id="bt-placeholder"></div>
 
 </div>

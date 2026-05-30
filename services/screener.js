@@ -1,217 +1,374 @@
-/**
- * services/screener.js
- * Screener engine: processes raw kline data into scored ScreenerResult objects.
- * Runs analysis in a Web Worker for non-blocking UI.
- */
-
-import { calcEMAArray, calcRSIArray, calcATR, getFibLevels, nearestFib } from '../indicators/engine.js';
-import { calcTrendAge } from '../indicators/regime.js';
+import { calcEMAArray, calcRSIArray, calcATR } from '../indicators/engine.js';
 import { fmtSym } from '../utils/helpers.js';
-
-// ── Curated Tier List ─────────────────────────────────────────────────────────
 
 export const SCR_CURATED_TIERS = {
   BTCUSDT:'T1', ETHUSDT:'T1', SOLUSDT:'T1', BNBUSDT:'T1', XRPUSDT:'T1',
-  AVAXUSDT:'T2', LINKUSDT:'T2', SUIUSDT:'T2', APTUSDT:'T2', TONUSDT:'T2',
-  NEARUSDT:'T2', INJUSDT:'T2', TIAUSDT:'T2', SEIUSDT:'T2', STXUSDT:'T2',
-  DOGEUSDT:'MEME', SHIBUSDT:'MEME', PEPEUSDT:'MEME', BONKUSDT:'MEME', WIFUSDT:'MEME',
-  FLOKIUSDT:'MEME', MEMEUSDT:'MEME', POPCATUSDT:'MEME', TURBOUSDT:'MEME',
-  ARBUSDT:'L2', OPUSDT:'L2', MATICUSDT:'L2', ZKSYNCUSDT:'L2',
-  UNIUSDT:'DeFi', AAVEUSDT:'DeFi', CRVUSDT:'DeFi', GMXUSDT:'DeFi',
-  FETUSDT:'AI', AGIXUSDT:'AI', WLDUSDT:'AI', RENDERUSDT:'AI', TAOAUSDT:'AI',
-  FILUSDT:'Infra', ARUSDT:'Infra', HBARUSDT:'Infra', FLOWUSDT:'Infra',
-  AXSUSDT:'Game', IMXUSDT:'Game', GALAUSDT:'Game',
-  BNBUSDT:'CEX', OKBUSDT:'CEX', CROKUSDT:'CEX',
+  DOGEUSDT:'T1', ADAUSDT:'T1', TRXUSDT:'T1', TONUSDT:'T1', LINKUSDT:'T1',
+  AVAXUSDT:'T2', SUIUSDT:'T2', APTUSDT:'T2', NEARUSDT:'T2', ARBUSDT:'T2',
+  OPUSDT:'T2', POLUSDT:'T2', RENDERUSDT:'T2', SEIUSDT:'T2', HYPEUSDT:'T2',
+  INJUSDT:'T2', TIAUSDT:'T2', KASUSDT:'T2', ICPUSDT:'T2', HBARUSDT:'T2',
+  VETUSDT:'T2', FILUSDT:'T2', ATOMUSDT:'T2', ALGOUSDT:'T2', XLMUSDT:'T2',
+  FETUSDT:'AI', TAOUSDT:'AI', AKTUSDT:'AI', OCEANUSDT:'AI', AGIXUSDT:'AI',
+  AIOZUSDT:'AI', WLDUSDT:'AI', ARKMUSDT:'AI', PHAUSDT:'AI', NMRUSDT:'AI',
+  PEPEUSDT:'MEME', SHIBUSDT:'MEME', BONKUSDT:'MEME', FLOKIUSDT:'MEME',
+  WIFUSDT:'MEME', BRETTUSDT:'MEME', POPCATUSDT:'MEME', MOGUSDT:'MEME',
+  TURBOUSDT:'MEME', BOMEUSDT:'MEME',
+  UNIUSDT:'DeFi', AAVEUSDT:'DeFi', MKRUSDT:'DeFi', CRVUSDT:'DeFi',
+  LDOUSDT:'DeFi', PENDLEUSDT:'DeFi', ENAUSDT:'DeFi', JUPUSDT:'DeFi',
+  RAYUSDT:'DeFi', SUSHIUSDT:'DeFi',
+  IMXUSDT:'Game', GALAUSDT:'Game', SANDUSDT:'Game', MANAUSDT:'Game',
+  AXSUSDT:'Game', BEAMUSDT:'Game', RONUSDT:'Game', ENJUSDT:'Game',
+  ILVUSDT:'Game', PIXELUSDT:'Game',
+  DOTUSDT:'Infra', FTMUSDT:'Infra', MNTUSDT:'Infra', ZKUSDT:'Infra',
+  STRKUSDT:'Infra', RUNEUSDT:'Infra', QNTUSDT:'Infra', EOSUSDT:'Infra',
+  XTZUSDT:'Infra', KAVAUSDT:'Infra',
+  OKBUSDT:'CEX', CROUSDT:'CEX', BGBUSDT:'CEX', KCSUSDT:'CEX', HTUSDT:'CEX',
+  ORDIUSDT:'Scalp', SATSUSDT:'Scalp', PYTHUSDT:'Scalp', WUSDT:'Scalp',
+  DYMUSDT:'Scalp', ZETAUSDT:'Scalp', AEVOUSDT:'Scalp', ETHFIUSDT:'Scalp',
+  BLURUSDT:'Scalp', PORTALUSDT:'Scalp',
+  JASMYUSDT:'Watch', THETAUSDT:'Watch', NEOUSDT:'Watch', CHZUSDT:'Watch',
+  COMPUSDT:'Watch',
 };
 
 export const SCR_DEFAULT_COINS = [
   'BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT',
   'AVAXUSDT','LINKUSDT','SUIUSDT','APTUSDT','TONUSDT',
   'DOGEUSDT','PEPEUSDT','BONKUSDT','WIFUSDT',
-  'ARBUSDT','OPUSDT','MATICUSDT',
+  'ARBUSDT','OPUSDT','POLUSDT',
   'UNIUSDT','AAVEUSDT',
   'FETUSDT','WLDUSDT','RENDERUSDT',
 ];
 
-// ── Single-Symbol Analysis ────────────────────────────────────────────────────
+const FIB_LEVELS = [
+  { r: 0,     label: '0%',    tier: 'ext',   strength: 1 },
+  { r: 0.236, label: '23.6%', tier: 'minor', strength: 2 },
+  { r: 0.382, label: '38.2%', tier: 'key',   strength: 3 },
+  { r: 0.5,   label: '50%',   tier: 'key',   strength: 4 },
+  { r: 0.618, label: '61.8%', tier: 'gold',  strength: 5 },
+  { r: 0.786, label: '78.6%', tier: 'key',   strength: 3 },
+  { r: 1,     label: '100%',  tier: 'ext',   strength: 1 },
+];
 
-/**
- * Analyses one symbol's multi-timeframe kline data and returns a ScreenerResult.
- * @param {string}  sym
- * @param {Record<string,Candle[]>} tfData   tf → candle array
- * @param {string}  primaryTf  — timeframe to base primary signal on
- * @param {number}  fetchedAt
- * @param {string}  source
- */
-export function analyseSymbol(sym, tfData, primaryTf, fetchedAt, source) {
-  const primary = tfData[primaryTf];
-  if (!primary || primary.length < 20) {
-    return null;
-  }
+const TF_MINS = { '1m':1, '3m':3, '5m':5, '15m':15, '30m':30, '1h':60, '4h':240, '1d':1440 };
 
-  const closes = primary.map(c => c.c);
-  const e9s    = calcEMAArray(closes, 9);
-  const e20s   = calcEMAArray(closes, 20);
-  const e50s   = calcEMAArray(closes, 50);
-  const rsiArr = calcRSIArray(closes);
-  const atr    = calcATR(primary, 14);
+export function analyseSymbol(sym, candles, primaryTf, tfData, activeTFs, fetchedAt, source) {
+  if (!candles || candles.length < 15) return null;
 
-  const lastE9  = e9s[e9s.length-1];
-  const lastE20 = e20s[e20s.length-1];
-  const lastE50 = e50s[e50s.length-1];
-  const rsi     = rsiArr[rsiArr.length-1];
-  const price   = primary[primary.length-1].c;
-  const price24 = primary[0].c;
-  const chgPct  = price24 > 0 ? (price - price24) / price24 * 100 : 0;
+  const k9 = 2 / 10, k20 = 2 / 21, k50 = 2 / 51;
+  let e9 = null, e20 = null, e50 = null;
+  let avgGain = null, avgLoss = null, prevC = null;
+  let rsi = null;
+  const rsiWindow = [];
+  let prevE9 = null, prevE20 = null;
+  let lastCrossIdx = -1;
 
-  // Bull/bear stack
-  const bullStack = lastE9 > lastE20 && lastE20 > lastE50;
-  const bearStack = lastE9 < lastE20 && lastE20 < lastE50;
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
 
-  // Signal
-  let signal = 'tang', signalClass = 'tang', signalLabel = 'NEUTRAL';
-  if (bullStack && rsi !== null && rsi >= 40 && rsi < 75) {
-    signal = 'bull'; signalClass = 'bull'; signalLabel = '▲ BULL';
-  } else if (bearStack && rsi !== null && rsi <= 60 && rsi > 25) {
-    signal = 'bear'; signalClass = 'bear'; signalLabel = '▼ BEAR';
-  } else if (bullStack) {
-    signal = 'bull'; signalClass = 'bull'; signalLabel = '▲ BULL';
-  } else if (bearStack) {
-    signal = 'bear'; signalClass = 'bear'; signalLabel = '▼ BEAR';
-  }
+    e9  = e9  === null ? c.c : c.c * k9  + e9  * (1 - k9);
+    e20 = e20 === null ? c.c : c.c * k20 + e20 * (1 - k20);
+    e50 = e50 === null ? c.c : c.c * k50 + e50 * (1 - k50);
 
-  // Trend age
-  const trendAge = calcTrendAge(e9s, e20s, e50s);
-
-  // Volume spike (compare last 3 candles vs 20-bar average)
-  const volAvg   = primary.slice(-20,-3).reduce((a,c) => a+c.v, 0) / 17;
-  const volRecent= primary.slice(-3).reduce((a,c) => a+c.v, 0) / 3;
-  const volRatio = volAvg > 0 ? volRecent / volAvg : null;
-  const volSpike = volRatio !== null && volRatio >= 2.5;
-  const volHot   = volRatio !== null && volRatio >= 1.5 && !volSpike;
-
-  // EMA20 distance %
-  const e20dist  = lastE20 > 0 ? (price - lastE20) / lastE20 * 100 : null;
-
-  // 24h range position
-  const h24 = Math.max(...primary.map(c => c.h));
-  const l24 = Math.min(...primary.map(c => c.l));
-  const hlPos= (h24 - l24) > 0 ? ((price - l24) / (h24 - l24)) * 100 : 50;
-
-  // Recent EMA crossover
-  let recentCross = false;
-  if (e9s.length > 5) {
-    for (let i = e9s.length - 5; i < e9s.length - 1; i++) {
-      const prevBull = e9s[i-1] > e20s[i-1];
-      const currBull = e9s[i] > e20s[i];
-      if (prevBull !== currBull) { recentCross = true; break; }
+    if (prevE9 !== null && prevE20 !== null) {
+      if ((prevE9 <= prevE20 && e9 > e20) || (prevE9 >= prevE20 && e9 < e20)) {
+        lastCrossIdx = i;
+      }
     }
+    prevE9 = e9; prevE20 = e20;
+
+    if (prevC !== null) {
+      const ch   = c.c - prevC;
+      const gain = Math.max(0, ch);
+      const loss = Math.max(0, -ch);
+      if (avgGain === null) {
+        rsiWindow.push({ gain, loss });
+        if (rsiWindow.length === 14) {
+          avgGain = rsiWindow.reduce((a, b) => a + b.gain, 0) / 14;
+          avgLoss = rsiWindow.reduce((a, b) => a + b.loss, 0) / 14;
+          const rs = avgLoss === 0 ? Infinity : avgGain / avgLoss;
+          rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + rs);
+        }
+      } else {
+        avgGain = (avgGain * 13 + gain) / 14;
+        avgLoss = (avgLoss * 13 + loss) / 14;
+        const rs = avgLoss === 0 ? Infinity : avgGain / avgLoss;
+        rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + rs);
+      }
+    }
+    prevC = c.c;
   }
 
-  // Fib proximity
-  const fibLevels = getFibLevels(primary.slice(-50));
-  const fib = fibLevels ? nearestFib(price, fibLevels) : null;
-  const fibProximity = fib && fib.distPct < 3
-    ? {
-      ...fib,
-      dir: fib.price < price ? 'support' : 'resistance',
-      dirLabel: fib.price < price ? '↓support' : '↑resistance',
-      strength: Math.max(0, 100 - fib.distPct * 30),
-    }
-    : null;
+  const price = candles[candles.length - 1].c;
 
-  // MTF confluence
-  const mtfTfs = Object.keys(tfData);
-  const mtfBreakdown = mtfTfs.map(tf => {
-    const arr = tfData[tf];
-    if (!arr || arr.length < 20) return { tf, signal: 'none' };
-    const c = arr.map(x => x.c);
-    const me9  = calcEMAArray(c, 9);
-    const me20 = calcEMAArray(c, 20);
-    const me50 = calcEMAArray(c, 50);
-    const mr   = calcRSIArray(c);
-    const le9  = me9[me9.length-1], le20 = me20[me20.length-1], le50 = me50[me50.length-1];
-    const lr   = mr[mr.length-1];
-    let s = 'tang';
-    if (le9 > le20 && le20 > le50 && (lr === null || (lr >= 40 && lr < 75))) s = 'bull';
-    else if (le9 < le20 && le20 < le50 && (lr === null || (lr <= 60 && lr > 25))) s = 'bear';
-    else if (le9 > le20 && le20 > le50) s = 'bull';
-    else if (le9 < le20 && le20 < le50) s = 'bear';
-    return { tf, signal: s, e9: le9, e20: le20, e50: le50 };
-  });
+  const candlesPer24h = Math.round(1440 / (TF_MINS[primaryTf] || 15));
+  const open24 = candles[Math.max(0, candles.length - candlesPer24h)].o;
+  const chgPct = open24 ? ((price - open24) / open24 * 100) : 0;
 
-  const validMtf  = mtfBreakdown.filter(m => m.signal !== 'none');
-  const bullCount = validMtf.filter(m => m.signal === 'bull').length;
-  const bearCount = validMtf.filter(m => m.signal === 'bear').length;
-  const dominated = Math.max(bullCount, bearCount);
-  const mtfDir    = bullCount > bearCount ? 'bull' : bearCount > bullCount ? 'bear' : 'neutral';
-  const mtfFull   = dominated === validMtf.length && validMtf.length > 1;
-  const mtfMost   = dominated > validMtf.length / 2 && !mtfFull;
-  const mtfScore  = validMtf.length > 0 ? (dominated / validMtf.length) * 100 : 0;
+  const crossLookback = Math.max(3, Math.round(30 / (TF_MINS[primaryTf] || 15)));
+  const recentCross = lastCrossIdx >= 0 && (candles.length - 1 - lastCrossIdx) <= crossLookback;
 
-  // Composite score
+  const bullStack = e9 > e20 && e20 > e50;
+  const bearStack = e9 < e20 && e20 < e50;
+
+  let signal      = 'tang';
+  let signalClass = 'tang';
+  let signalLabel = '⚠ MIXED';
+  if (bullStack)      { signal = 'bull'; signalClass = 'bull'; signalLabel = '▲ LONG';  }
+  else if (bearStack) { signal = 'bear'; signalClass = 'bear'; signalLabel = '▼ SHORT'; }
+
+  const stackLabel = bullStack ? '9>20>50 🟢' : bearStack ? '9<20<50 🔴' : '⚠ Tangled';
+
   let score = 0;
-  if (bullStack || bearStack) score += 25;
-  if (mtfFull)   score += 30;
-  else if (mtfMost) score += 15;
-  if (volSpike)  score += 15;
-  else if (volHot) score += 8;
-  if (recentCross) score += 10;
+
+  if (bullStack || bearStack) score += 30;
+
   if (rsi !== null) {
-    const rsiOk = signal === 'bull'
-      ? (rsi > 45 && rsi < 70)
-      : (rsi < 55 && rsi > 30);
-    if (rsiOk) score += 10;
+    if      (signal === 'bull' && rsi > 50 && rsi < 65)   score += 20;
+    else if (signal === 'bull' && rsi >= 40 && rsi < 50)   score += 12;
+    else if (signal === 'bear' && rsi < 50 && rsi > 35)    score += 20;
+    else if (signal === 'bear' && rsi >= 50 && rsi <= 60)  score += 12;
+
+    if (signal === 'bull' && price > e20) score += 15;
+    if (signal === 'bear' && price < e20) score += 15;
+
+    if (rsi < 30 && signal === 'bull' && recentCross) score += 15;
+    if (rsi > 70 && signal === 'bear' && recentCross) score += 15;
   }
-  if (fibProximity && fibProximity.tier === 'gold') score += 10;
-  if (trendAge <= 3 && trendAge > 0) score += 10;
-  if (hlPos >= 75)  score -= 5;
-  if (hlPos <= 25)  score -= 5;
-  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  if (recentCross) score += 15;
+
+  score = Math.min(100, score);
+
+  const swingWindow = candles.slice(-50);
+  const swingHi = Math.max(...swingWindow.map(c => c.h));
+  const swingLo = Math.min(...swingWindow.map(c => c.l));
+  const fibRange = swingHi - swingLo;
+
+  let fibProximity = null;
+  if (fibRange > 0) {
+    let nearest = null, nearestDist = Infinity;
+    FIB_LEVELS.forEach(f => {
+      const fibPrice = swingHi - fibRange * f.r;
+      const dist = Math.abs(price - fibPrice);
+      const distPct = (dist / fibRange) * 100;
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearest = { ...f, fibPrice, distPct, distPctOfPrice: (dist / price) * 100 };
+      }
+    });
+
+    if (nearest && nearest.distPctOfPrice < 3.0) {
+      const lookN     = Math.min(5, candles.length - 1);
+      const priceNAgo = lookN > 0 ? candles[candles.length - 1 - lookN].c : price;
+      const pctMove   = priceNAgo > 0 ? (price - priceNAgo) / priceNAgo * 100 : 0;
+      const isRising  = pctMove >  0.1;
+      const isFalling = pctMove < -0.1;
+      const fibAbove  = nearest.fibPrice > price;
+
+      let dir, dirLabel;
+      if      (isRising  && fibAbove)  { dir = 'resistance'; dirLabel = '↑ Res';  }
+      else if (isFalling && !fibAbove) { dir = 'support';    dirLabel = '↓ Supp'; }
+      else if (isRising  && !fibAbove) { dir = 'support';    dirLabel = '↓ Supp'; }
+      else if (isFalling && fibAbove)  { dir = 'resistance'; dirLabel = '↑ Res';  }
+      else                              { dir = 'neutral';    dirLabel = '— Flat'; }
+
+      const qualifies = nearest.tier !== 'ext' || nearest.distPctOfPrice < 1.0;
+      if (qualifies) {
+        fibProximity = {
+          label:          nearest.label,
+          r:              nearest.r,
+          tier:           nearest.tier,
+          strength:       nearest.strength,
+          fibPrice:       nearest.fibPrice,
+          distPct:        nearest.distPctOfPrice,
+          distPctOfRange: nearest.distPct,
+          dir,
+          dirLabel,
+        };
+      }
+    }
+  }
+
+  if (fibProximity) {
+    const { tier, dir, distPct } = fibProximity;
+    const proximity = distPct < 0.5 ? 1.0 : distPct < 1.5 ? 0.7 : 0.4;
+    let fibBonus = 0;
+    if      (tier === 'gold')  fibBonus = 20;
+    else if (tier === 'key')   fibBonus = 14;
+    else if (tier === 'minor') fibBonus = 7;
+    const misaligned = (signal === 'bull' && dir === 'resistance') ||
+                       (signal === 'bear' && dir === 'support');
+    fibBonus = Math.round(fibBonus * proximity * (misaligned ? 0.5 : 1.0));
+    score = Math.min(100, score + fibBonus);
+  }
+
+  const hasFakeVol = candles.some(c => c._fakeVol);
+  const volWindow  = candles.slice(-21, -1);
+  const avgVol     = volWindow.length ? volWindow.reduce((a, c) => a + c.v, 0) / volWindow.length : 0;
+  const curVol     = candles[candles.length - 1].v;
+  const volRatio   = avgVol > 0 ? curVol / avgVol : 1;
+  const volSpike   = volRatio >= 2.0;
+  const volHot     = volRatio >= 1.5;
+
+  if (volSpike && (bullStack || bearStack)) score = Math.min(100, score + 10);
+
+  const e20dist = e20 > 0 ? ((price - e20) / e20 * 100) : 0;
+
+  if (Math.abs(e20dist) <= 1.0 && (bullStack || bearStack))
+    score = Math.min(100, score + 8);
+  else if (Math.abs(e20dist) > 5.0)
+    score = Math.max(0, score - 10);
+
+  const cPer24  = Math.round(1440 / (TF_MINS[primaryTf] || 15));
+  const last24  = candles.slice(-Math.min(cPer24, candles.length));
+  const hi24    = Math.max(...last24.map(c => c.h));
+  const lo24    = Math.min(...last24.map(c => c.l));
+  const hlRange = hi24 - lo24;
+  const hlPos   = hlRange > 0 ? ((price - lo24) / hlRange * 100) : 50;
+  const nearHigh = hlPos >= 80;
+  const nearLow  = hlPos <= 20;
+
+  const trendAge = lastCrossIdx >= 0
+    ? (candles.length - 1 - lastCrossIdx)
+    : (bullStack || bearStack ? candles.length : 0);
+
+  const atr = calcATR(candles, 14);
+
+  const available = activeTFs.filter(t => tfData[t] && tfData[t].signal !== 'none');
+  const bulls     = available.filter(t => tfData[t].signal === 'bull').length;
+  const bears     = available.filter(t => tfData[t].signal === 'bear').length;
+  const dominated = Math.max(bulls, bears);
+  const mtfDir    = bulls > bears ? 'bull' : bears > bulls ? 'bear' : 'mixed';
+  const mtfScore  = available.length ? Math.round(dominated / available.length * 100) : 0;
+  const mtfFull   = dominated === available.length && available.length > 1;
+  const mtfMost   = !mtfFull && dominated >= Math.ceil(available.length * 0.75);
+  const mtfBreakdown = activeTFs.map(t => ({
+    tf:     t,
+    signal: tfData[t] ? tfData[t].signal : 'none',
+  }));
 
   return {
-    sym, price, chgPct, signal, signalClass, signalLabel,
-    rsi, score, bullStack, bearStack,
-    stackLabel: bullStack ? '9>20>50' : bearStack ? '9<20<50' : 'MIXED',
-    trendAge, volRatio, volSpike, volHot, e20dist,
-    hlPos, nearHigh: hlPos >= 80, nearLow: hlPos <= 20,
-    recentCross, fibProximity,
+    sym, price, chgPct,
+    signal, signalClass, signalLabel, stackLabel,
+    e9, e20, e50, rsi, score,
+    bullStack, bearStack,
+    recentCross, fibProximity, hasFakeVol,
+    volRatio, volSpike, volHot, avgVol, curVol,
+    e20dist, hlPos, nearHigh, nearLow, hi24, lo24,
+    trendAge, atr,
     mtfDir, mtfScore, mtfFull, mtfMost, mtfBreakdown,
-    bullCount, bearCount, availTFs: validMtf.length, totalTFs: mtfBreakdown.length,
-    fetchedAt, source, tfData,
-    atr, e9: lastE9, e20: lastE20, e50: lastE50,
+    bullCount: bulls, bearCount: bears,
+    availTFs: available.length, totalTFs: activeTFs.length,
+    fetchedAt, source,
   };
 }
 
-// ── Screener Filters ──────────────────────────────────────────────────────────
+export function calcTFSnapshot(candles, tf) {
+  if (!candles || candles.length < 15) return null;
+
+  const k9 = 2 / 10, k20 = 2 / 21, k50 = 2 / 51;
+  let e9 = null, e20 = null, e50 = null;
+  let avgGain = null, avgLoss = null, prevC = null;
+  let rsi = null;
+  const rsiWindow = [];
+  let prevE9 = null, prevE20 = null, lastCrossIdx = -1;
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    e9  = e9  === null ? c.c : c.c * k9  + e9  * (1 - k9);
+    e20 = e20 === null ? c.c : c.c * k20 + e20 * (1 - k20);
+    e50 = e50 === null ? c.c : c.c * k50 + e50 * (1 - k50);
+
+    if (prevE9 !== null && prevE20 !== null) {
+      if ((prevE9 <= prevE20 && e9 > e20) || (prevE9 >= prevE20 && e9 < e20))
+        lastCrossIdx = i;
+    }
+    prevE9 = e9; prevE20 = e20;
+
+    if (prevC !== null) {
+      const ch = c.c - prevC;
+      const gain = Math.max(0, ch), loss = Math.max(0, -ch);
+      if (avgGain === null) {
+        rsiWindow.push({ gain, loss });
+        if (rsiWindow.length === 14) {
+          avgGain = rsiWindow.reduce((a, b) => a + b.gain, 0) / 14;
+          avgLoss = rsiWindow.reduce((a, b) => a + b.loss, 0) / 14;
+          rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+        }
+      } else {
+        avgGain = (avgGain * 13 + gain) / 14;
+        avgLoss = (avgLoss * 13 + loss) / 14;
+        rsi = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+      }
+    }
+    prevC = c.c;
+  }
+
+  const bullStack = e9 > e20 && e20 > e50;
+  const bearStack = e9 < e20 && e20 < e50;
+
+  let signal = 'tang', signalClass = 'tang', signalLabel = '⚠ MIXED';
+  if (bullStack)      { signal = 'bull'; signalClass = 'bull'; signalLabel = '▲ LONG';  }
+  else if (bearStack) { signal = 'bear'; signalClass = 'bear'; signalLabel = '▼ SHORT'; }
+
+  return { signal, signalClass, signalLabel, e9, e20, e50, rsi, bullStack, bearStack };
+}
 
 export function applyScreenerFilters(results, filter) {
   if (filter === 'all') return results;
   return results.filter(r => {
-    if (filter === 'bull')    return r.signal === 'bull';
-    if (filter === 'bear')    return r.signal === 'bear';
-    if (filter === 'hot')     return r.volSpike || r.volHot;
-    if (filter === 'cross')   return r.recentCross;
-    if (filter === 'breakout')return r.mtfFull && (r.volSpike || r.volHot);
-    return true;
+    switch (filter) {
+      case 'bull':      return r.signal === 'bull';
+      case 'bear':      return r.signal === 'bear';
+      case 'cross':     return r.recentCross;
+      case 'ob':        return r.rsi !== null && r.rsi >= 70;
+      case 'os':        return r.rsi !== null && r.rsi <= 30;
+      case 'fib':       return r.fibProximity !== null;
+      case 'fib618':    return r.fibProximity?.r === 0.618;
+      case 'fib50':     return r.fibProximity?.r === 0.5;
+      case 'fib382':    return r.fibProximity?.r === 0.382;
+      case 'fib_sup':   return r.fibProximity?.dir === 'support';
+      case 'fib_res':   return r.fibProximity?.dir === 'resistance';
+      case 'mtf_full':  return r.mtfFull;
+      case 'mtf_most':  return r.mtfFull || r.mtfMost;
+      case 'vol_spike': return r.volSpike;
+      case 'near_ema':  return Math.abs(r.e20dist || 0) <= 1.5;
+      case 'fresh':     return r.trendAge <= 5;
+      default:          return true;
+    }
   });
 }
 
 export function sortScreenerResults(results, key, asc) {
   return [...results].sort((a, b) => {
-    let av = a[key], bv = b[key];
+    let av, bv;
+    switch (key) {
+      case 'sym':      av = a.sym;    bv = b.sym;    return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      case 'signal':   av = a.signal; bv = b.signal; return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      case 'stack':    av = a.bullStack ? 1 : a.bearStack ? -1 : 0;
+                       bv = b.bullStack ? 1 : b.bearStack ? -1 : 0; break;
+      case 'price':    av = a.price;               bv = b.price;               break;
+      case 'chg':      av = a.chgPct;              bv = b.chgPct;              break;
+      case 'rsi':      av = a.rsi      ?? -Infinity; bv = b.rsi      ?? -Infinity; break;
+      case 'score':    av = a.score;               bv = b.score;               break;
+      case 'mtf':      av = a.mtfScore ?? 0;        bv = b.mtfScore ?? 0;        break;
+      case 'vol':      av = a.volRatio ?? 0;        bv = b.volRatio ?? 0;        break;
+      case 'dist':     av = Math.abs(a.e20dist ?? 0); bv = Math.abs(b.e20dist ?? 0); break;
+      case 'hlpos':    av = a.hlPos    ?? 50;       bv = b.hlPos    ?? 50;       break;
+      case 'age':      av = a.trendAge ?? 0;        bv = b.trendAge ?? 0;        break;
+      case 'fib':      av = a.fibProximity ? a.fibProximity.distPct  : 999;
+                       bv = b.fibProximity ? b.fibProximity.distPct  : 999; break;
+      case 'fibstr':   av = a.fibProximity ? a.fibProximity.strength : 0;
+                       bv = b.fibProximity ? b.fibProximity.strength : 0; break;
+      case 'fetchage': av = a.fetchedAt ?? 0; bv = b.fetchedAt ?? 0; break;
+      default:         av = a[key] ?? -Infinity; bv = b[key] ?? -Infinity;
+    }
     if (av === null || av === undefined) av = -Infinity;
     if (bv === null || bv === undefined) bv = -Infinity;
     return asc ? av - bv : bv - av;
   });
 }
 
-// ── Sector Rotation Detector ──────────────────────────────────────────────────
-
-/**
- * Given screener results, returns a sector breakdown showing which categories
- * are showing bullish vs bearish signals.
- */
 export function detectSectorRotation(results) {
   const sectors = {};
 
