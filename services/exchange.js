@@ -19,7 +19,8 @@ export const EXCHANGES = {
     wsPing: ()  => ({ op:'ping' }),
     wsKlineConfirm: msg => msg?.data?.[0]?.confirm,
     wsKlineToCandle: k  => ({ t:+k.start, o:+k.open, h:+k.high, l:+k.low, c:+k.close, v:+k.volume }),
-    klineUrl: (sym, tf) => `/api/klines?exchange=bybit&sym=${sym}&tf=${BY_TF[tf]||'5'}`,
+    wsTradeToTick:   t  => ({ price:+t.p, qty:+t.v, side: t.S==='Buy'?'buy':'sell', ts:+t.T }),
+    klineUrl: (sym, tf) => `https://api.bybit.com/v5/market/kline?category=spot&symbol=${sym}&interval=${BY_TF[tf]||'5'}&limit=500`,
     parseKlines: d => (d?.result?.list||[]).slice().reverse().map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})),
     parseWsKlines: msg => msg?.data || [],
   },
@@ -38,7 +39,7 @@ export const EXCHANGES = {
     wsKlineConfirm: msg => msg?.data?.k?.x || msg?.k?.x,
     wsKlineToCandle: k => { const kd=k.k||k; return {t:+kd.t,o:+kd.o,h:+kd.h,l:+kd.l,c:+kd.c,v:+kd.v}; },
     wsTradeToTick:   t => { const d=t.data||t; return {price:+d.p,qty:+d.q,side:d.m?'sell':'buy',ts:+d.T}; },
-    klineUrl: (sym, tf) => `/api/klines?exchange=binance&sym=${sym}&tf=${tf}`,
+    klineUrl: (sym, tf) => `https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${tf}&limit=500`,
     parseKlines: d => (Array.isArray(d)?d:[]).map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})),
     parseWsKlines: msg => {
       const k = msg?.data?.k || msg?.k;
@@ -62,7 +63,10 @@ export const EXCHANGES = {
     wsKlineConfirm: msg => msg?.data?.[0]?.[8]==='1',
     wsKlineToCandle: k  => ({ t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5] }),
     wsTradeToTick:   t  => ({ price:+t.px,qty:+t.sz,side:t.side==='buy'?'buy':'sell',ts:+t.ts }),
-    klineUrl: (sym, tf) => `/api/klines?exchange=okx&sym=${sym}&tf=${OKX_TF_REST[tf]||'5m'}`,
+    klineUrl: (sym, tf) => {
+      const instId = sym.replace('USDT','-USDT');
+      return `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${OKX_TF_REST[tf]||'5m'}&limit=500`;
+    },
     parseKlines: d => (d?.data||[]).slice().reverse().map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})),
     parseWsKlines: msg => msg?.data || [],
   },

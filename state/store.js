@@ -82,6 +82,8 @@ export const state = {
   // ── Anchored VWAP ────────────────────────────────────────────────────────
   anchorIdx:  null,
   avwapVals:  [],
+  avwapCumPV:  0,    
+  avwapCumV:   0,    
 
   // ── Worker VP result ─────────────────────────────────────────────────────
   workerVP: null,
@@ -177,4 +179,9 @@ export function resetCandleState() {
   state.regime = null;
   state.swingPoints = []; state.structureEvents = [];
   state.hoverIdx = -1;
+  state.anchorIdx  = null;
+  state.avwapVals  = [];
+  state.avwapCumPV = 0;   
+  state.avwapCumV  = 0;   
+  state.workerVP   = null;
 }

@@ -298,20 +298,20 @@ function addCandleToState(c) {
 }
 
 function _appendAvwapBar(c) {
-  const tp = (c.h + c.l + c.c) / 3;
-  // Guard against zero/missing volume — use TP as fallback so no NaN leaks in.
+  const tp  = (c.h + c.l + c.c) / 3;
   const vol = (c.v > 0) ? c.v : 0;
   state.avwapCumPV += tp * vol;
   state.avwapCumV  += vol;
-  const v = state.avwapCumV > 0 ? state.avwapCumPV / state.avwapCumV : c.c;
-  state.avwapVals.push(v);
+  const v = state.avwapCumV > 0
+    ? state.avwapCumPV / state.avwapCumV
+    : c.c;  // fallback to close, never push null/NaN
+  if (v != null && !isNaN(v)) state.avwapVals.push(v);
 }
-
 // Safe single read-point for latest AVWAP value.
 function _getLatestAvwap() {
   if (!Array.isArray(state.avwapVals) || state.avwapVals.length === 0) return null;
-  console.log('[AVWAP getLatest] returning null — length:', state.avwapVals?.length, 'anchorIdx:', state.anchorIdx);
   const v = state.avwapVals[state.avwapVals.length - 1];
+  console.log('[getLatest] v=', v, 'type=', typeof v, 'isNaN=', isNaN(v), 'null?', v == null);
   return (v != null && !isNaN(v)) ? v : null;
 }
 
