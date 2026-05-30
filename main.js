@@ -1071,6 +1071,11 @@ function renderScreenerTable() {
     const hlPos    = r.hlPos ?? 50;
     const hlBarCol = hlPos >= 80 ? '#ff3d5a' : hlPos <= 20 ? '#00e5a0' : '#4da6ff';
     const hlLabel  = hlPos >= 80 ? 'High' : hlPos <= 20 ? 'Low' : Math.round(hlPos) + '%';
+    const hlMark   = (signal === 'bull' && nearLow) ? ' ✓' 
+                  : (signal === 'bear' && nearHigh) ? ' ✓'
+                  : (signal === 'bull' && nearHigh) ? ' ⚠'
+                  : (signal === 'bear' && nearLow)  ? ' ⚠'
+                  : '';
     const mtfStr   = r.availTFs > 0 ? `${Math.max(r.bullCount, r.bearCount)}/${r.availTFs}` : '—';
     const mtfCol   = r.mtfFull ? '#00e5a0' : r.mtfMost ? '#ffb82e' : 'var(--text2)';
     const ageTxt   = r.trendAge != null ? r.trendAge + 'c' : '—';
@@ -1091,7 +1096,7 @@ function renderScreenerTable() {
         <div style="position:relative;width:36px;height:6px;background:var(--bg3);border-radius:2px;display:inline-block">
           <div style="position:absolute;left:0;top:0;height:100%;width:${hlPos}%;background:${hlBarCol};border-radius:2px"></div>
         </div>
-        <span style="font-family:var(--mono);font-size:8px;color:${hlBarCol};margin-left:3px">${hlLabel}</span>
+        <span style="font-family:var(--mono);font-size:8px;color:${hlBarCol};margin-left:3px">${hlLabel}${hlMark}</span>
       </td>
       <td><span style="font-family:var(--mono);font-size:9px;color:${ageCol}">${ageTxt}</span></td>
       <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${r.sym}')">Trade →</button></td>
