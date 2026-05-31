@@ -8,6 +8,7 @@ import { computeSuggestion, scoreEntryQuality, computeEntryZones, computePartial
 import { calcFuturesMetrics, calcRiskBasedSize, calcATRStop, calcATRTrailStop, calcDailyGoal, suggestLeverage } from './engine/risk.js';
 import { initRenderer, scheduleRender, cancelPendingRender, RenderPriority } from './engine/renderer.js';
 import { KlineWebSocket, TradeStream, fetchKlines, fetchKlinesFallback, batchFetchScreener } from './services/exchange.js';
+import { initSearch, initScreenerFilter, getScreenerTextFilter } from './components/search.js';
 import { analyseSymbol, calcTFSnapshot, applyScreenerFilters, sortScreenerResults, detectSectorRotation, SCR_DEFAULT_COINS, SCR_CURATED_TIERS } from './services/screener.js';
 import { initJournal, openJournalEntry, saveJournalEntry, renderJournalList, renderJournalStats, exportJournal, deleteJournalTrade, editJournalTrade } from './components/journal.js';
 import { LWCChart } from './charts/lwc.js';
@@ -61,6 +62,10 @@ Object.assign(window, {
   btRun, btCompare, btExport,
   computeAndRender,
   renderScreenerTable,
+  clearScreenerFilter: () => {
+  const el = document.getElementById('scr-text-filter');
+  if (el) { el.value = ''; el.dispatchEvent(new Event('input')); }
+},
 });
 
 const FIB_CONFIGS = [
@@ -128,6 +133,8 @@ export function init() {
   const btSlot = dom.el['bt-placeholder'];
   if (btSlot) btSlot.outerHTML = backtesterHTML();
   initBacktester();
+  initSearch();
+  requestAnimationFrame(() => initScreenerFilter());
   dom.resolveLazy();
 }
 
@@ -1018,7 +1025,10 @@ function renderScreenerTable() {
   const tbody = dom.el['scr-tbody'];
   if (!tbody) return;
 
-  let rows = applyScreenerFilters(scrResults, scrFilter);
+  const textQ = getScreenerTextFilter();
+  let rows = applyScreenerFilters(state.scrResults, state.scrFilter).filter(r =>
+    !textQ || r.sym.includes(textQ) || r.sym.replace('USDT','').includes(textQ)
+  );
   rows = sortScreenerResults(rows, scrSortKey, scrSortAsc);
 
   if (!rows.length) {
