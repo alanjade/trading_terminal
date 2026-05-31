@@ -569,7 +569,7 @@
         <table id="scr-table" class="scr-table">
           <thead>
             <tr>
-              <th onclick="scrSort('sym')">Symbol</th>
+              <th onclick="scrSort('sym')" title="Symbol · primary scan TF shown below">Symbol / TF</th>
               <th onclick="scrSort('price')">Price</th>
               <th onclick="scrSort('chg')">Chg%</th>
               <th onclick="scrSort('signal')">Signal</th>
@@ -610,6 +610,73 @@
         </label>
         <span id="replay-progress-lbl" class="stat-lbl mono">0 / 0</span>
       </div>
+    </div>
+  </div>
+
+  <!-- MTF Confluence -->
+  <div id="card-mtf" class="card card--collapsible collapsed">
+    <div class="card-header" onclick="toggleCard('card-mtf')">
+      <span class="card-title">🔀 MTF Confluence</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn--primary btn--icon" id="mtf-scan-btn" onclick="event.stopPropagation();runMTFScan()">▶ Scan</button>
+        <span class="card-chevron">▾</span>
+      </div>
+    </div>
+    <div class="card-body">
+
+      <!-- Coin input -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+        <input id="mtf-coin-inp" class="input-field" placeholder="Add coin e.g. BTC" style="width:110px;font-size:10px"
+          onkeydown="if(event.key==='Enter')mtfAddCoin()" />
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfAddCoin()">+</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadFromScreener()" title="Load top scored coins from last screener scan">⬇ From Screener</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadWatchlist()" title="Load watchlist coins">⬇ Watchlist</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfClearCoins()">✕ Clear</button>
+        <span id="mtf-coin-count" class="stat-lbl">0 coins</span>
+      </div>
+
+      <!-- TF toggles -->
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;flex-wrap:wrap">
+        <span class="stat-lbl" style="margin-right:4px">TFs:</span>
+        <button class="pill-btn" id="mtf-tf-1m"  onclick="toggleMTFTf('1m',this)">1m</button>
+        <button class="pill-btn active" id="mtf-tf-5m"  onclick="toggleMTFTf('5m',this)">5m</button>
+        <button class="pill-btn active" id="mtf-tf-15m" onclick="toggleMTFTf('15m',this)">15m</button>
+        <button class="pill-btn active" id="mtf-tf-30m" onclick="toggleMTFTf('30m',this)">30m</button>
+        <button class="pill-btn active" id="mtf-tf-1h"  onclick="toggleMTFTf('1h',this)">1h</button>
+        <button class="pill-btn active" id="mtf-tf-4h"  onclick="toggleMTFTf('4h',this)">4h</button>
+      </div>
+
+      <!-- Filter -->
+      <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="pill-btn scr-filter-btn active" onclick="mtfSetFilter('all',this)">All</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('full_bull',this)">Full Bull</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('full_bear',this)">Full Bear</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('conflict',this)">Conflict</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('clean',this)">No Conflict</button>
+      </div>
+
+      <!-- Progress -->
+      <div id="mtf-progress" style="display:none;margin-bottom:6px">
+        <div class="progress-track" style="margin-bottom:4px">
+          <div id="mtf-progress-bar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <span id="mtf-progress-lbl" class="stat-lbl">0/0</span>
+      </div>
+
+      <!-- Table -->
+      <div class="scr-table-wrap">
+        <table id="mtf-table" class="scr-table">
+          <thead>
+            <tr id="mtf-thead-row">
+              <!-- populated dynamically -->
+            </tr>
+          </thead>
+          <tbody id="mtf-tbody">
+            <tr><td colspan="8" class="scr-empty">Add coins and scan, or load from screener</td></tr>
+          </tbody>
+        </table>
+      </div>
+
     </div>
   </div>
 

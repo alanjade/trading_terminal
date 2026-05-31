@@ -374,7 +374,7 @@ export function analyseSymbol(sym, candles, primaryTf, tfData, activeTFs, fetche
   score = Math.min(100, Math.max(0, score));
 
   return {
-    sym, price, chgPct,
+    sym, price, chgPct, primaryTf,
     signal, signalClass, signalLabel, stackLabel,
     e9, e20, e50, rsi, score,
     bullStack, bearStack,

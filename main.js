@@ -45,6 +45,13 @@ let scrRunning   = false;
 let scrResults   = [];
 let scrAutoTimer = null;
 
+// ── MTF Confluence state ──────────────────────────────────────────────────────
+let mtfCoins   = [];
+let mtfTFs     = ['5m','15m','30m','1h','4h'];
+let mtfResults = [];
+let mtfFilter  = 'all';
+let mtfRunning = false;
+
 Object.assign(window, {
   state,
   fmt, fmtSym, fmtK,
@@ -60,6 +67,8 @@ Object.assign(window, {
   anchorToSessionOpen, clearAnchor, replayLoad, replayToggle, replayStep, replayReset,
   openJournalEntry,
   btRun, btCompare, btExport,
+  runMTFScan, mtfAddCoin, mtfClearCoins, mtfLoadFromScreener, mtfLoadWatchlist,
+  toggleMTFTf, mtfSetFilter,
   computeAndRender,
   renderScreenerTable,
   clearScreenerFilter: () => {
@@ -134,9 +143,27 @@ export function init() {
   if (btSlot) btSlot.outerHTML = backtesterHTML();
   initBacktester();
   initSearch();
-  requestAnimationFrame(() => initScreenerFilter());
-  dom.resolveLazy();
-}
+
+    // Allow searching any symbol directly
+    const searchInp = document.getElementById('sym-search') 
+      || document.querySelector('.search-input')
+      || document.querySelector('input[placeholder*="earch"]');
+
+    if (searchInp) {
+      searchInp.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        const raw = searchInp.value.trim().toUpperCase().replace('/', '');
+        if (!raw) return;
+        const sym = raw.endsWith('USDT') ? raw : raw + 'USDT';
+        searchInp.value = '';
+        searchInp.blur();
+        initSym(sym, state.tf);
+        document.querySelector('.chart-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+    requestAnimationFrame(() => initScreenerFilter());
+    dom.resolveLazy();
+  }
 
 function _ensureAvwapState() {
   if (!Array.isArray(state.avwapVals))         state.avwapVals  = [];
@@ -1026,7 +1053,7 @@ function renderScreenerTable() {
   if (!tbody) return;
 
   const textQ = getScreenerTextFilter();
-  let rows = applyScreenerFilters(state.scrResults, state.scrFilter).filter(r =>
+  let rows = applyScreenerFilters(scrResults, scrFilter).filter(r =>
     !textQ || r.sym.includes(textQ) || r.sym.replace('USDT','').includes(textQ)
   );
   rows = sortScreenerResults(rows, scrSortKey, scrSortAsc);
@@ -1113,7 +1140,7 @@ function renderScreenerTable() {
                    : (r.signal === 'bull' && r.nearHigh)  ? ' ⚠'
                    : (r.signal === 'bear' && r.nearLow)   ? ' ⚠'
                    :                                         '';
-    const hlMarkCol = hlMark === ' ✓' ? '#00e5a0' : hlMark === ' ⚠' ? '#ffb82e' : hlBarCol;
+    const hlMarkCol = hlMark === ' ✓' ? '#00e5a0' : hlMark === ' ⚠' ? '#ffb82e' : 'var(--text2)';
 
     // Trend age
     const ageTxt = r.trendAge != null ? r.trendAge + 'c' : '—';
@@ -1141,8 +1168,11 @@ function renderScreenerTable() {
 
     return `<tr style="${rowStyle}">
       <td>
-        <span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}${isTop5 ? '⭐' : ''}</span>
-        ${badges.length ? `<div style="display:flex;gap:3px;margin-top:2px">${badges.join('')}</div>` : ''}
+          <span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}${isTop5 ? '⭐' : ''}</span>
+          <div style="display:flex;gap:3px;margin-top:2px;flex-wrap:wrap">
+            <span style="font-size:8px;color:var(--text3);font-family:var(--mono)">${r.primaryTf || '—'}</span>
+            ${badges.join('')}
+          </div>
       </td>
       <td class="scr-price">${fmt(r.price)}</td>
       <td class="scr-chg ${chgCls}">${(r.chgPct >= 0 ? '+' : '') + r.chgPct.toFixed(2) + '%'}</td>
@@ -1158,9 +1188,8 @@ function renderScreenerTable() {
       </td>
       <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${stackCol}">${stackTxt}</span></td>
       <td title="${mtfTitle}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${mtfCol}">${mtfStr}${r.higherTFConflict ? ' ⚠' : ''}</span></td>
-      <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${volCol};background:${volBg};border-radius:6px;padding:1px 5px">${volStr}${volMark}</span></td>
-      <td><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
-      <td>
+      <td title="Vol ratio: ${r.volRatio != null ? r.volRatio.toFixed(2) : '—'}x vs 20-bar avg | Cur: ${fmtK(r.curVol)} | Avg: ${fmtK(r.avgVol)}${r.volSpike ? ' | 🔥 Spike (≥2x)' : r.volHot ? ' | ⚡ Hot (≥1.5x)' : ''}${r.volAligned ? ' | ✓ Aligned with signal' : r.volOpposed ? ' | ⚠ Opposed to signal' : ''}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${volCol};background:${volBg};border-radius:6px;padding:1px 5px">${volStr}${volMark}</span></td>      <td><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
+      <td title="24h High: ${fmt(r.hi24)} | Low: ${fmt(r.lo24)} | Position: ${Math.round(hlPos)}% from low${hlMark === ' ✓' ? ' — good entry side' : hlMark === ' ⚠' ? ' — extended, caution' : ''}">
         <div style="position:relative;width:36px;height:6px;background:var(--bg3);border-radius:2px;display:inline-block">
           <div style="position:absolute;left:0;top:0;height:100%;width:${hlPos}%;background:${hlBarCol};border-radius:2px"></div>
         </div>
@@ -1353,6 +1382,241 @@ function handleKeyDown(e) {
   if (k === ']') { state.rrRatio = Math.min(10, state.rrRatio + 0.5); setRRRatio(state.rrRatio); }
   if (k === 'A') anchorToSessionOpen();
   if (k === 'X') clearAnchor();
+}
+
+// ── MTF Confluence ────────────────────────────────────────────────────────────
+
+function _mtfUpdateCoinCount() {
+  const el = document.getElementById('mtf-coin-count');
+  if (el) el.textContent = `${mtfCoins.length} coin${mtfCoins.length !== 1 ? 's' : ''}`;
+}
+
+function mtfAddCoin() {
+  const inp = document.getElementById('mtf-coin-inp');
+  if (!inp) return;
+  const raw = inp.value.trim().toUpperCase();
+  if (!raw) return;
+  const sym = raw.endsWith('USDT') ? raw : raw + 'USDT';
+  if (mtfCoins.includes(sym)) { showToast(`${sym} already added`); inp.value = ''; return; }
+  mtfCoins.push(sym);
+  _mtfUpdateCoinCount();
+  showToast(`✓ ${sym} added`);
+  inp.value = '';
+}
+
+function mtfClearCoins() {
+  mtfCoins   = [];
+  mtfResults = [];
+  _mtfUpdateCoinCount();
+  renderMTFTable();
+}
+
+function mtfLoadFromScreener() {
+  if (!scrResults.length) { showToast('Run screener first'); return; }
+  const top = [...scrResults]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20)
+    .map(r => r.sym);
+  mtfCoins = [...new Set([...mtfCoins, ...top])];
+  _mtfUpdateCoinCount();
+  showToast(`✓ Loaded ${top.length} coins from screener`);
+}
+
+function mtfLoadWatchlist() {
+  if (!state.watchlist.length) { showToast('Watchlist is empty'); return; }
+  mtfCoins = [...new Set([...mtfCoins, ...state.watchlist])];
+  _mtfUpdateCoinCount();
+  showToast(`✓ Loaded ${state.watchlist.length} watchlist coins`);
+}
+
+function toggleMTFTf(tf, btn) {
+  const idx = mtfTFs.indexOf(tf);
+  if (idx >= 0) {
+    if (mtfTFs.length === 1) { showToast('Need at least one TF'); return; }
+    mtfTFs.splice(idx, 1);
+  } else {
+    mtfTFs.push(tf);
+    mtfTFs.sort((a, b) => TF_ORDER.indexOf(a) - TF_ORDER.indexOf(b));
+  }
+  btn?.classList.toggle('active', mtfTFs.includes(tf));
+}
+
+function mtfSetFilter(f, btn) {
+  mtfFilter = f;
+  document.querySelectorAll('#card-mtf .scr-filter-btn').forEach(b => b.classList.remove('active'));
+  btn?.classList.add('active');
+  renderMTFTable();
+}
+
+async function runMTFScan() {
+  if (mtfRunning) return;
+  if (!mtfCoins.length) { showToast('Add coins first'); return; }
+
+  mtfRunning = true;
+  const btn = document.getElementById('mtf-scan-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Scanning…'; }
+  const prog    = document.getElementById('mtf-progress');
+  const progBar = document.getElementById('mtf-progress-bar');
+  const progLbl = document.getElementById('mtf-progress-lbl');
+  if (prog) prog.style.display = 'block';
+
+  const activeTFs = TF_ORDER.filter(t => mtfTFs.includes(t));
+  const exch      = scrExchange;
+
+  // Check which coins already have fresh cached data from last screener run
+  const cached    = new Map(scrResults.map(r => [r.sym, r]));
+  const needFetch = mtfCoins.filter(s => !cached.has(s));
+  const useCache  = mtfCoins.filter(s =>  cached.has(s));
+
+  mtfResults = [];
+
+  // Use cached screener results directly for coins already scanned
+  useCache.forEach(sym => {
+    const r = cached.get(sym);
+    mtfResults.push({
+      sym,
+      price:    r.price,
+      signal:   r.signal,
+      tfs:      r.mtfBreakdown || activeTFs.map(t => ({ tf: t, signal: 'none', weight: 1 })),
+      score:    r.score,
+      mtfScore: r.mtfScore,
+      mtfFull:  r.mtfFull,
+      conflict: r.higherTFConflict,
+      fromCache: true,
+    });
+  });
+
+  // Fetch fresh data for coins not in screener cache
+  if (needFetch.length) {
+    const rawData = await batchFetchScreener(needFetch, activeTFs, exch, ({ done, total, sym }) => {
+      const pct = Math.round((useCache.length + done) / mtfCoins.length * 100);
+      if (progBar) progBar.style.width = pct + '%';
+      if (progLbl) progLbl.textContent = `${useCache.length + done}/${mtfCoins.length} — ${sym}`;
+    });
+
+    rawData.forEach((tfCandles, sym) => {
+      const primaryTf = activeTFs.find(t => tfCandles[t]?.length >= 15);
+      if (!primaryTf) return;
+
+      const snapshotMap = {};
+      activeTFs.forEach(tf => {
+        const candles = tfCandles[tf];
+        if (!candles?.length) return;
+        const snap = calcTFSnapshot(candles, tf);
+        if (snap) snapshotMap[tf] = snap;
+      });
+
+      const r = analyseSymbol(sym, tfCandles[primaryTf], primaryTf, snapshotMap, activeTFs, Date.now(), exch);
+      if (!r) return;
+
+      mtfResults.push({
+        sym,
+        price:    r.price,
+        signal:   r.signal,
+        tfs:      r.mtfBreakdown || activeTFs.map(t => ({ tf: t, signal: 'none', weight: 1 })),
+        score:    r.score,
+        mtfScore: r.mtfScore,
+        mtfFull:  r.mtfFull,
+        conflict: r.higherTFConflict,
+        fromCache: false,
+      });
+    });
+  }
+
+  // Sort: full confluence first, then by mtfScore desc
+  mtfResults.sort((a, b) => {
+    if (a.mtfFull && !b.mtfFull) return -1;
+    if (!a.mtfFull && b.mtfFull) return  1;
+    return b.mtfScore - a.mtfScore;
+  });
+
+  renderMTFTable();
+  mtfRunning = false;
+  if (btn) { btn.disabled = false; btn.textContent = '▶ Scan'; }
+  if (prog) prog.style.display = 'none';
+  showToast(`MTF scan done — ${mtfResults.length} coins (${useCache.length} cached, ${needFetch.length} fetched)`);
+}
+
+function renderMTFTable() {
+  const tbody    = document.getElementById('mtf-tbody');
+  const theadRow = document.getElementById('mtf-thead-row');
+  if (!tbody || !theadRow) return;
+
+  const activeTFs = TF_ORDER.filter(t => mtfTFs.includes(t));
+
+  // Build header dynamically based on active TFs
+  theadRow.innerHTML = `
+    <th>Symbol</th>
+    <th>Price</th>
+    <th>Overall</th>
+    ${activeTFs.map(tf => `<th title="Weight: ${({'1m':1,'3m':1,'5m':1,'15m':2,'30m':2,'1h':3,'4h':5,'1d':8})[tf] || 1}×">${tf}</th>`).join('')}
+    <th>Score</th>
+    <th></th>
+  `;
+
+  // Apply filter
+  let rows = mtfResults.filter(r => {
+    const bullCount = r.tfs.filter(t => t.signal === 'bull').length;
+    const bearCount = r.tfs.filter(t => t.signal === 'bear').length;
+    const total     = r.tfs.filter(t => t.signal !== 'none').length;
+    switch (mtfFilter) {
+      case 'full_bull': return bullCount === total && total > 0;
+      case 'full_bear': return bearCount === total && total > 0;
+      case 'conflict':  return r.conflict;
+      case 'clean':     return !r.conflict;
+      default:          return true;
+    }
+  });
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="${activeTFs.length + 4}" class="scr-empty">${mtfResults.length ? 'No coins match filter' : 'No results — run a scan first'}</td></tr>`;
+    return;
+  }
+
+  const SIG_COLOR = { bull: '#00e5a0', bear: '#ff3d5a', tang: '#ffb82e', none: 'var(--text3)' };
+  const SIG_LABEL = { bull: '▲', bear: '▼', tang: '~', none: '—' };
+  const SIG_BG    = { bull: 'rgba(0,229,160,0.12)', bear: 'rgba(255,61,90,0.12)', tang: 'rgba(255,184,46,0.08)', none: 'transparent' };
+
+  tbody.innerHTML = rows.map(r => {
+    const bullCount  = r.tfs.filter(t => t.signal === 'bull').length;
+    const bearCount  = r.tfs.filter(t => t.signal === 'bear').length;
+    const total      = r.tfs.filter(t => t.signal !== 'none').length;
+    const allBull    = bullCount === total && total > 0;
+    const allBear    = bearCount === total && total > 0;
+    const overallCol = allBull ? '#00e5a0' : allBear ? '#ff3d5a' : r.conflict ? '#ff3d5a' : '#ffb82e';
+    const overallTxt = allBull ? '▲ Full Bull' : allBear ? '▼ Full Bear' : r.conflict ? '⚠ Conflict' : `${bullCount}B ${bearCount}S`;
+    const scoreCol   = r.score >= 75 ? '#00e5a0' : r.score >= 50 ? '#4da6ff' : r.score >= 30 ? '#ffb82e' : '#3d4460';
+    const cacheTag   = r.fromCache ? `<span title="Using cached screener data" style="font-size:7px;color:var(--text3);font-family:var(--mono)">cached</span>` : '';
+
+    // Per-TF cells — match to activeTFs order
+    const tfMap = Object.fromEntries(r.tfs.map(t => [t.tf, t.signal]));
+    const tfCells = activeTFs.map(tf => {
+      const sig = tfMap[tf] || 'none';
+      return `<td style="text-align:center;background:${SIG_BG[sig]}">
+        <span style="font-family:var(--mono);font-size:11px;font-weight:700;color:${SIG_COLOR[sig]}"
+              title="${tf}: ${sig}">${SIG_LABEL[sig]}</span>
+      </td>`;
+    }).join('');
+
+    return `<tr>
+      <td>
+        <span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}</span>
+        <div style="margin-top:2px">${cacheTag}</div>
+      </td>
+      <td class="scr-price" style="font-size:10px">${fmt(r.price)}</td>
+      <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${overallCol}">${overallTxt}</span></td>
+      ${tfCells}
+      <td>
+        <div class="score-bar">
+          <div class="score-track">
+            <div class="score-fill" style="width:${r.score}%;background:${scoreCol}"></div>
+          </div>
+          <span style="font-size:9px;color:${scoreCol};font-family:var(--mono);font-weight:700;min-width:24px">${r.score}</span>
+        </div>
+      </td>
+      <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${r.sym}')">Trade →</button></td>
+    </tr>`;
+  }).join('');
 }
 
 if (document.readyState === 'loading') {
