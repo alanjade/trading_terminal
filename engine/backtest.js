@@ -10,13 +10,42 @@
  *
  */
 
-import { calcEMAArray, calcRSIArray, calcATR, calcATRArray } from '../indicators/engine.js';
+import { calcEMAArray, calcRSIArray, calcATR, calcATRArray, getFibLevels, nearestFib } from '../indicators/engine.js';
 import { detectRegime }    from '../indicators/regime.js';
 import { detectSwingPoints, detectStructureBreaks } from '../indicators/structure.js';
+import { TF_MS } from '../utils/helpers.js';
+
+// ── Strategy stop/entry buffer constants ──────────────────────────────────────
+const STOP_BUFFER_PCT  = 0.0005;  // 0.05% beyond swing extreme for stop placement
+const EMA_TOUCH_BAND   = 0.002;   // 0.2% band for "price touched EMA" detection
+const VOL_BREAKOUT_MIN = 1.5;     // minimum volume multiplier vs avg for breakout confirmation
+
+// ── Warm-up bar minimum ───────────────────────────────────────────────────────
+// EMA-50 needs 50 bars, RSI-14 needs 14 bars, ATR-14 needs 14 bars.
+// 60 bars covers all indicators with a small buffer.
+const DEFAULT_WARMUP_BARS = 60;
+
+const DEFAULT_MAX_BAR_DURATION = 50;
+
+const BARS_PER_YEAR = {
+  '1m':  365 * 24 * 60,
+  '3m':  365 * 24 * 20,
+  '5m':  365 * 24 * 12,
+  '15m': 365 * 24 * 4,
+  '30m': 365 * 24 * 2,
+  '1h':  365 * 24,
+  '4h':  365 * 6,
+  '1d':  365,
+};
 
 // ── Strategy Definitions ──────────────────────────────────────────────────────
 
 export const STRATEGIES = {
+  COMPOSITE: {
+    id:    'composite',
+    label: '⭐ App Signal (Combined)',
+    desc:  'Mirrors the live suggestion engine exactly — EMA stack + RSI + VWAP + local structure + Fib. Backtest what the app actually signals.',
+  },
   EMA_PULLBACK: {
     id:    'ema_pullback',
     label: 'EMA Pullback',
@@ -50,29 +79,28 @@ class Trade {
   constructor({ entryIdx, entryPrice, dir, stopPrice, targetPrice, tpPrices, size, atr }) {
     this.entryIdx    = entryIdx;
     this.entryPrice  = entryPrice;
-    this.dir         = dir;        // 'long' | 'short'
+    this.dir         = dir;
     this.stopPrice   = stopPrice;
     this.targetPrice = targetPrice;
-    this.tpPrices    = tpPrices || [];  // [tp1, tp2, tp3]
-    this.size        = size;            // notional $
+    this.tpPrices    = tpPrices || [];
+    this.size        = size;
     this.atr         = atr;
     this.exitIdx     = null;
     this.exitPrice   = null;
-    this.exitReason  = null;    // 'tp' | 'sl' | 'trail' | 'eod' | 'signal'
+    this.exitReason  = null;
     this.pnl         = null;
     this.rr          = null;
-    this.mae         = 0;       // max adverse excursion
-    this.mfe         = 0;       // max favourable excursion
+    this.mae         = 0;
+    this.mfe         = 0;
     this.barDuration = 0;
     this._trailStop  = null;
-    this._tpHit      = 0;       // partial TP index hit
+    this._tpHit      = 0;
     this._scaled     = false;
   }
 
   get isOpen() { return this.exitIdx === null; }
   get isLong()  { return this.dir === 'long'; }
 
-  // Called each bar while open
   updateExcursions(candle) {
     const { h, l } = candle;
     if (this.isLong) {
@@ -90,21 +118,20 @@ class Trade {
   }
 
   close(exitIdx, exitPrice, reason, feeRate = 0) {
-    this.exitIdx   = exitIdx;
-    this.exitPrice = exitPrice;
+    this.exitIdx    = exitIdx;
+    this.exitPrice  = exitPrice;
     this.exitReason = reason;
 
     const priceDiff = this.isLong
       ? exitPrice - this.entryPrice
       : this.entryPrice - exitPrice;
 
-    const grossPnl = (priceDiff / this.entryPrice) * this.size;
-    const fees     = this.size * feeRate * 2;
+    const grossPnl = (priceDiff / this.entryPrice) * this.size / (this._leverage || 1);
+    const fees     = (this.size / (this._leverage || 1)) * feeRate * 2;
     this.pnl       = grossPnl - fees;
 
-    const risk  = Math.abs(this.entryPrice - this.stopPrice);
-    this.rr     = risk > 0 ? priceDiff / risk : 0;
-    return this;
+    const risk = Math.abs(this.entryPrice - this.stopPrice);
+    this.rr = risk > 0 ? priceDiff / risk : null;
   }
 }
 
@@ -112,30 +139,32 @@ class Trade {
 
 export class BacktestEngine {
   constructor(config) {
-    this.candles     = config.candles || [];
-    this.strategy    = config.strategy || STRATEGIES.EMA_PULLBACK;
-    this.capital     = config.capital    ?? 1000;
-    this.riskPct     = config.riskPct    ?? 1;      // % of capital per trade
-    this.leverage    = config.leverage   ?? 10;
-    this.feeRate     = config.feeRate    ?? 0.0002;
-    this.rrRatio     = config.rrRatio    ?? 2;
-    this.atrMultiple = config.atrMultiple ?? 2;
-    this.trailStop   = config.trailStop  ?? false;
-    this.partialTPs  = config.partialTPs ?? true;   // scale out at 1R, 2R
-    this.maxOpenTrades = config.maxOpenTrades ?? 1;
-    this.warmupBars  = config.warmupBars ?? 60;     // bars before trading starts
-    this.onProgress  = config.onProgress ?? null;   // (pct) => void
+    this.candles        = config.candles      || [];
+    this.strategy       = config.strategy     || STRATEGIES.COMPOSITE;
+    this.capital        = config.capital      ?? 1000;
+    this.riskPct        = config.riskPct      ?? 1;
+    this.leverage       = config.leverage     ?? 10;
+    this.feeRate        = config.feeRate      ?? 0.0002;
+    this.rrRatio        = config.rrRatio      ?? 2;
+    this.atrMultiple    = config.atrMultiple  ?? 2;
+    this.trailStop      = config.trailStop    ?? false;
+    this.partialTPs     = config.partialTPs   ?? true;
+    this.maxOpenTrades  = config.maxOpenTrades ?? 1;
+    this.warmupBars     = config.warmupBars   ?? DEFAULT_WARMUP_BARS;
+    this.maxBarDuration = config.maxBarDuration ?? DEFAULT_MAX_BAR_DURATION;
+    this.tf             = config.tf           || '5m';
+    this.onProgress     = config.onProgress   ?? null;
 
-    // Pre-computed indicators
     this._closes = null;
-    this._e9s = null;
-    this._e20s = null;
-    this._e50s = null;
-    this._rsi  = null;
-    this._atrs = null;
+    this._e9s    = null;
+    this._e20s   = null;
+    this._e50s   = null;
+    this._rsi    = null;
+    this._atrs   = null;
+    this._vwap   = null;
   }
 
-  // ── Pre-compute indicators ────────────────────────────────────────────────
+  // ── Pre-compute indicators ──────────────────────────────────────────────
 
   _precompute() {
     this._closes = this.candles.map(c => c.c);
@@ -144,9 +173,7 @@ export class BacktestEngine {
     this._e50s   = calcEMAArray(this._closes, 50);
     this._rsi    = calcRSIArray(this._closes, 14);
     this._atrs   = calcATRArray(this.candles, 14);
-
-    // VWAP (simple session reset each day)
-    this._vwap = this._calcVWAPArray(this.candles);
+    this._vwap   = this._calcVWAPArray(this.candles);
   }
 
   _calcVWAPArray(candles) {
@@ -158,12 +185,13 @@ export class BacktestEngine {
         if (key !== sessionKey) { cumPV = 0; cumV = 0; sessionKey = key; }
       }
       const tp = (c.h + c.l + c.c) / 3;
-      cumPV += tp * c.v; cumV += c.v;
+      // Guard against zero-volume bars (gaps, illiquid markets).
+      if (c.v > 0) { cumPV += tp * c.v; cumV += c.v; }
       return cumV > 0 ? cumPV / cumV : c.c;
     });
   }
 
-  // ── Run ───────────────────────────────────────────────────────────────────
+  // ── Run ─────────────────────────────────────────────────────────────────
 
   run() {
     if (this.candles.length < this.warmupBars + 10) {
@@ -172,21 +200,30 @@ export class BacktestEngine {
 
     this._precompute();
 
-    const trades    = [];
-    let openTrades  = [];
-    let equity      = this.capital;
+    const trades      = [];
+    let openTrades    = [];
+    let equity        = this.capital;
     const equityCurve = [{ idx: 0, value: equity }];
 
     for (let i = this.warmupBars; i < this.candles.length; i++) {
       const c = this.candles[i];
 
-      // ── Update open trades ────────────────────────────────────────────
+      // ── Update open trades ──────────────────────────────────────────
       for (const trade of [...openTrades]) {
         trade.updateExcursions(c);
 
-        // Update trailing stop
+        // FIX (#6): force-close trades that have exceeded maxBarDuration.
+        if (trade.barDuration >= this.maxBarDuration) {
+          trade.close(i, c.c, 'timeout', this.feeRate);
+          openTrades = openTrades.filter(t => t !== trade);
+          trades.push(trade);
+          equity += trade.pnl;
+          equityCurve.push({ idx: i, value: equity });
+          continue;
+        }
+
         if (this.trailStop && trade._tpHit >= 1) {
-          const atr = this._atrs[i] || trade.atr;
+          const atr      = this._atrs[i] || trade.atr;
           const newTrail = trade.isLong
             ? c.c - atr * this.atrMultiple
             : c.c + atr * this.atrMultiple;
@@ -200,13 +237,11 @@ export class BacktestEngine {
 
         const stopToUse = trade._trailStop ?? trade.stopPrice;
 
-        // Check partial TPs
         if (this.partialTPs && trade._tpHit < trade.tpPrices.length) {
           const nextTP = trade.tpPrices[trade._tpHit];
           const tpHit  = trade.isLong ? c.h >= nextTP : c.l <= nextTP;
           if (tpHit) {
             trade._tpHit++;
-            // Move stop to breakeven after TP1
             if (trade._tpHit === 1) {
               if (trade.isLong  && trade.stopPrice < trade.entryPrice) trade.stopPrice = trade.entryPrice;
               if (!trade.isLong && trade.stopPrice > trade.entryPrice) trade.stopPrice = trade.entryPrice;
@@ -214,8 +249,24 @@ export class BacktestEngine {
           }
         }
 
-        // Check stop loss
-        const slHit = trade.isLong ? c.l <= stopToUse : c.h >= stopToUse;
+        const slHit = trade.isLong ? c.l <= stopToUse  : c.h >= stopToUse;
+        const tpHit = trade.isLong ? c.h >= trade.targetPrice : c.l <= trade.targetPrice;
+
+        if (slHit && tpHit) {
+          const o = c.o ?? c.c; // use open if available, fall back to close
+          const tpFirst = trade.isLong ? o >= trade.targetPrice : o <= trade.targetPrice;
+          if (tpFirst) {
+            trade.close(i, trade.targetPrice, 'tp', this.feeRate);
+          } else {
+            trade.close(i, stopToUse, 'sl', this.feeRate);
+          }
+          openTrades = openTrades.filter(t => t !== trade);
+          trades.push(trade);
+          equity += trade.pnl;
+          equityCurve.push({ idx: i, value: equity });
+          continue;
+        }
+
         if (slHit) {
           trade.close(i, stopToUse, 'sl', this.feeRate);
           openTrades = openTrades.filter(t => t !== trade);
@@ -225,8 +276,6 @@ export class BacktestEngine {
           continue;
         }
 
-        // Check take profit
-        const tpHit = trade.isLong ? c.h >= trade.targetPrice : c.l <= trade.targetPrice;
         if (tpHit) {
           trade.close(i, trade.targetPrice, 'tp', this.feeRate);
           openTrades = openTrades.filter(t => t !== trade);
@@ -236,25 +285,23 @@ export class BacktestEngine {
         }
       }
 
-      // ── Check for new entries ─────────────────────────────────────────
+      // ── Check for new entries ───────────────────────────────────────
       if (openTrades.length < this.maxOpenTrades) {
         const signal = this._evalStrategy(i);
         if (signal) {
-          const atr   = this._atrs[i];
+          const atr = this._atrs[i];
           if (!atr) continue;
 
           const { dir, entry, stop } = signal;
           const stopDist = Math.abs(entry - stop);
           if (stopDist <= 0) continue;
 
-          // Risk-based sizing
           const riskUSD = equity * (this.riskPct / 100);
-          const tokens  = riskUSD / stopDist;
+          const tokens  = (riskUSD * this.leverage) / stopDist;
           const size    = tokens * entry;
 
-          // TP levels
-          const tp1 = dir === 'long' ? entry + stopDist     : entry - stopDist;
-          const tp2 = dir === 'long' ? entry + stopDist * 2 : entry - stopDist * 2;
+          const tp1 = dir === 'long' ? entry + stopDist                : entry - stopDist;
+          const tp2 = dir === 'long' ? entry + stopDist * 2            : entry - stopDist * 2;
           const tp3 = dir === 'long' ? entry + stopDist * this.rrRatio : entry - stopDist * this.rrRatio;
 
           const trade = new Trade({
@@ -267,35 +314,36 @@ export class BacktestEngine {
             size,
             atr,
           });
+          // Store leverage on the trade so close() can scale P&L correctly.
+          trade._leverage = this.leverage;
 
           openTrades.push(trade);
         }
       }
 
-      // Progress callback every 100 bars
       if (this.onProgress && i % 100 === 0) {
         this.onProgress(Math.round((i / this.candles.length) * 100));
       }
     }
 
-    // Close any remaining open trades at last bar
-    const lastC = this.candles[this.candles.length - 1];
     for (const trade of openTrades) {
-      trade.close(this.candles.length - 1, lastC.c, 'eod', this.feeRate);
+      const lastIdx = this.candles.length - 1;
+      const markPrice = this.candles[lastIdx].c;
+      trade.close(lastIdx, markPrice, 'eod', this.feeRate);
       trades.push(trade);
       equity += trade.pnl;
     }
     equityCurve.push({ idx: this.candles.length - 1, value: equity });
 
-    const metrics = calcMetrics(trades, this.capital, equityCurve, this.candles);
-
+    const metrics = calcMetrics(trades, this.capital, equityCurve, this.tf);
     return { trades, metrics, equityCurve, initialCapital: this.capital };
   }
 
-  // ── Strategy Evaluators ───────────────────────────────────────────────────
+  // ── Strategy Router ─────────────────────────────────────────────────────
 
   _evalStrategy(i) {
     switch (this.strategy.id) {
+      case 'composite':       return this._composite(i);
       case 'ema_pullback':    return this._emaPullback(i);
       case 'ema_cross':       return this._emaCross(i);
       case 'rsi_mean_revert': return this._rsiMeanRevert(i);
@@ -305,59 +353,122 @@ export class BacktestEngine {
     }
   }
 
-  _emaPullback(i) {
-    if (i < 3) return null;
-    const e9   = this._e9s[i],  e20 = this._e20s[i], e50 = this._e50s[i];
-    const pe9  = this._e9s[i-1], pe20 = this._e20s[i-1];
-    const rsi  = this._rsi[i];
-    const c    = this.candles[i];
-    const pc   = this.candles[i - 1];
-    const atr  = this._atrs[i];
+  // ── ⭐ Composite — exact port of computeSuggestion ───────────────────────
+
+  _composite(i) {
+    if (i < Math.max(this.warmupBars, 50)) return null;
+
+    const e9  = this._e9s[i];
+    const e20 = this._e20s[i];
+    const e50 = this._e50s[i];
+    const rsi = this._rsi[i];
+    const atr = this._atrs[i];
+    const vwap= this._vwap[i];
+    const c   = this.candles[i];
+
     if (!e9 || !e20 || !e50 || !atr || rsi === null) return null;
 
-    // Bull: EMA stack + candle just touched EMA9 from above
+    const bullish   = e9 > e20 && e20 > e50;
+    const bearish   = e9 < e20 && e20 < e50;
+    const aboveVwap = vwap ? c.c > vwap : null;
+
+    const localStart   = Math.max(0, i - 4);
+    const localCandles = this.candles.slice(localStart, i + 1);
+    const localLow     = Math.min(...localCandles.map(x => x.l));
+    const localHigh    = Math.max(...localCandles.map(x => x.h));
+
+    let dir, entry, stop;
+
+    if (bullish && rsi < 65) {
+      dir   = 'long';
+      entry = c.c;
+      stop  = Math.min(e20, localLow) * (1 - STOP_BUFFER_PCT);
+
+    } else if (bearish && rsi > 35) {
+      dir   = 'short';
+      entry = c.c;
+      stop  = Math.max(e20, localHigh) * (1 + STOP_BUFFER_PCT);
+
+    } else if (rsi < 35 && e9 > e50) {
+      dir   = 'long';
+      entry = c.c;
+      stop  = localLow * (1 - STOP_BUFFER_PCT);
+
+    } else if (rsi > 65 && e9 < e50) {
+      dir   = 'short';
+      entry = c.c;
+      stop  = localHigh * (1 + STOP_BUFFER_PCT);
+
+    } else {
+      return null;
+    }
+
+    if (dir === 'long'  && entry <= stop) return null;
+    if (dir === 'short' && entry >= stop) return null;
+
+    const stopDist = Math.abs(entry - stop);
+    if (stopDist <= 0) return null;
+
+    // ── VWAP soft filter ────────────────────────────────────────────────
+    if (aboveVwap !== null && atr > 0) {
+      const vwapDist = Math.abs(c.c - vwap);
+      if (dir === 'long'  && !aboveVwap && vwapDist > atr) return null;
+      if (dir === 'short' &&  aboveVwap && vwapDist > atr) return null;
+    }
+
+    return { dir, entry, stop };
+  }
+
+  // ── EMA Pullback ────────────────────────────────────────────────────────
+
+  _emaPullback(i) {
+    if (i < 3) return null;
+    const e9  = this._e9s[i],  e20 = this._e20s[i], e50 = this._e50s[i];
+    const rsi = this._rsi[i];
+    const c   = this.candles[i];
+    const pc  = this.candles[i - 1];
+    const atr = this._atrs[i];
+    if (!e9 || !e20 || !e50 || !atr || rsi === null) return null;
+
     if (e9 > e20 && e20 > e50 && rsi > 40 && rsi < 65) {
-      const touchedEMA9 = pc.l <= e9 * 1.002 && c.c > e9;
+      const touchedEMA9 = pc.l <= e9 * (1 + EMA_TOUCH_BAND) && c.c > e9;
       if (touchedEMA9) {
         const entry = c.c;
-        const stop  = Math.min(e20, c.l) * 0.9995;
+        const stop  = Math.min(e20, c.l) - atr * 0.5;
         return { dir: 'long', entry, stop };
       }
     }
-
-    // Bear: inverted EMA stack + bounce off EMA9 from below
     if (e9 < e20 && e20 < e50 && rsi < 60 && rsi > 35) {
-      const touchedEMA9 = pc.h >= e9 * 0.998 && c.c < e9;
+      const touchedEMA9 = pc.h >= e9 * (1 - EMA_TOUCH_BAND) && c.c < e9;
       if (touchedEMA9) {
         const entry = c.c;
-        const stop  = Math.max(e20, c.h) * 1.0005;
+        const stop  = Math.max(e20, c.h) + atr * 0.5;
         return { dir: 'short', entry, stop };
       }
     }
-
     return null;
   }
 
+  // ── EMA Crossover ───────────────────────────────────────────────────────
+
   _emaCross(i) {
     if (i < 2) return null;
-    const e9   = this._e9s[i],  e20 = this._e20s[i], e50 = this._e50s[i];
-    const pe9  = this._e9s[i-1], pe20 = this._e20s[i-1];
-    const rsi  = this._rsi[i];
-    const c    = this.candles[i];
-    const atr  = this._atrs[i];
+    const e9  = this._e9s[i],  e20  = this._e20s[i], e50 = this._e50s[i];
+    const pe9 = this._e9s[i-1], pe20 = this._e20s[i-1];
+    const rsi = this._rsi[i];
+    const c   = this.candles[i];
+    const atr = this._atrs[i];
     if (!e9 || !e20 || !e50 || !pe9 || !pe20 || !atr || rsi === null) return null;
 
     const bullCross = pe9 <= pe20 && e9 > e20;
     const bearCross = pe9 >= pe20 && e9 < e20;
 
-    if (bullCross && e50 && e9 > e50 && rsi < 70) {
-      return { dir: 'long',  entry: c.c, stop: c.c - atr * this.atrMultiple };
-    }
-    if (bearCross && e50 && e9 < e50 && rsi > 30) {
-      return { dir: 'short', entry: c.c, stop: c.c + atr * this.atrMultiple };
-    }
+    if (bullCross && e9 > e50 && rsi < 70) return { dir: 'long',  entry: c.c, stop: c.c - atr * this.atrMultiple };
+    if (bearCross && e9 < e50 && rsi > 30) return { dir: 'short', entry: c.c, stop: c.c + atr * this.atrMultiple };
     return null;
   }
+
+  // ── RSI Mean Reversion ──────────────────────────────────────────────────
 
   _rsiMeanRevert(i) {
     if (i < 2) return null;
@@ -368,48 +479,37 @@ export class BacktestEngine {
     const atr  = this._atrs[i];
     if (!e50 || rsi === null || prsi === null || !atr) return null;
 
-    // RSI oversold bounce (long when price > EMA50)
-    if (prsi < 30 && rsi > prsi && c.c > e50) {
-      return { dir: 'long',  entry: c.c, stop: c.l - atr * 0.5 };
-    }
-    // RSI overbought fade (short when price < EMA50)
-    if (prsi > 70 && rsi < prsi && c.c < e50) {
-      return { dir: 'short', entry: c.c, stop: c.h + atr * 0.5 };
-    }
+    if (prsi < 30 && rsi > prsi && c.c > e50) return { dir: 'long',  entry: c.c, stop: c.l - atr * 0.5 };
+    if (prsi > 70 && rsi < prsi && c.c < e50) return { dir: 'short', entry: c.c, stop: c.h + atr * 0.5 };
     return null;
   }
+
+  // ── Structure Breakout ──────────────────────────────────────────────────
 
   _breakout(i) {
     if (i < 20) return null;
     const lookback = 20;
-    const window   = this.candles.slice(i - lookback, i);
-    const hi       = Math.max(...window.map(c => c.h));
-    const lo       = Math.min(...window.map(c => c.l));
-    const c        = this.candles[i];
-    const pc       = this.candles[i - 1];
-    const e50      = this._e50s[i];
-    const atr      = this._atrs[i];
-    const rsi      = this._rsi[i];
+    const lookbackCandles = this.candles.slice(i - lookback, i);
+    const hi  = Math.max(...lookbackCandles.map(c => c.h));
+    const lo  = Math.min(...lookbackCandles.map(c => c.l));
+    const c   = this.candles[i];
+    const pc  = this.candles[i - 1];
+    const e50 = this._e50s[i];
+    const atr = this._atrs[i];
+    const rsi = this._rsi[i];
     if (!e50 || !atr || rsi === null) return null;
 
-    // Volume spike check (2× average)
-    const volAvg = window.reduce((a, x) => a + x.v, 0) / lookback;
-
-    // Bullish breakout
-    if (pc.c < hi && c.c > hi && c.c > e50 && c.v > volAvg * 1.5 && rsi < 80) {
-      return { dir: 'long',  entry: c.c, stop: hi - atr * 0.5 };
-    }
-    // Bearish breakdown
-    if (pc.c > lo && c.c < lo && c.c < e50 && c.v > volAvg * 1.5 && rsi > 20) {
-      return { dir: 'short', entry: c.c, stop: lo + atr * 0.5 };
-    }
+    const volAvg = lookbackCandles.reduce((a, x) => a + x.v, 0) / lookback;
+    if (pc.c < hi && c.c > hi && c.c > e50 && c.v > volAvg * VOL_BREAKOUT_MIN && rsi < 80) return { dir: 'long',  entry: c.c, stop: hi - atr * 0.5 };
+    if (pc.c > lo && c.c < lo && c.c < e50 && c.v > volAvg * VOL_BREAKOUT_MIN && rsi > 20) return { dir: 'short', entry: c.c, stop: lo + atr * 0.5 };
     return null;
   }
+
+  // ── VWAP Bounce ─────────────────────────────────────────────────────────
 
   _vwapBounce(i) {
     if (i < 2) return null;
     const vwap = this._vwap[i];
-    const pvwap= this._vwap[i - 1];
     const e20  = this._e20s[i];
     const e50  = this._e50s[i];
     const c    = this.candles[i];
@@ -418,9 +518,8 @@ export class BacktestEngine {
     const rsi  = this._rsi[i];
     if (!vwap || !e20 || !e50 || !atr || rsi === null) return null;
 
-    // Price dipped to VWAP and bounced back above — bullish
-    const bullBounce = pc.l <= vwap * 1.001 && c.c > vwap && e20 > e50 && rsi < 65;
-    const bearBounce = pc.h >= vwap * 0.999 && c.c < vwap && e20 < e50 && rsi > 35;
+    const bullBounce = pc.l <= vwap * (1 + STOP_BUFFER_PCT * 2) && c.c > vwap && e20 > e50 && rsi < 65;
+    const bearBounce = pc.h >= vwap * (1 - STOP_BUFFER_PCT * 2) && c.c < vwap && e20 < e50 && rsi > 35;
 
     if (bullBounce) return { dir: 'long',  entry: c.c, stop: c.l - atr * 0.5 };
     if (bearBounce) return { dir: 'short', entry: c.c, stop: c.h + atr * 0.5 };
@@ -429,11 +528,7 @@ export class BacktestEngine {
 }
 
 // ── Metrics Calculator ────────────────────────────────────────────────────────
-
-/**
- * Calculates full performance metrics from a list of closed trades.
- */
-export function calcMetrics(trades, initialCapital, equityCurve, candles) {
+export function calcMetrics(trades, initialCapital, equityCurve, tf = '5m') {
   if (!trades.length) return null;
 
   const closed  = trades.filter(t => t.pnl !== null);
@@ -453,33 +548,25 @@ export function calcMetrics(trades, initialCapital, equityCurve, candles) {
   const avgLoss = losses.length > 0 ? grossLoss / losses.length : 0;
   const expectancy = (winRate * avgWin) - ((1 - winRate) * avgLoss);
 
-  // Average RR
-  const rrVals = closed.filter(t => t.rr !== null).map(t => t.rr);
+  const rrVals = closed.filter(t => t.rr != null).map(t => t.rr);
   const avgRR  = rrVals.length > 0 ? rrVals.reduce((a, b) => a + b, 0) / rrVals.length : null;
 
-  // Drawdown
   const { maxDrawdown, maxDrawdownPct, drawdownCurve } = calcDrawdown(equityCurve);
+  const sharpe = calcSharpe(equityCurve, tf);
 
-  // Sharpe-like ratio (annualised)
-  const sharpe = calcSharpe(equityCurve, candles);
-
-  // Consecutive wins/losses
   let maxConsecWins = 0, maxConsecLoss = 0, cw = 0, cl = 0;
   closed.forEach(t => {
     if (t.pnl > 0) { cw++; cl = 0; maxConsecWins = Math.max(maxConsecWins, cw); }
     else           { cl++; cw = 0; maxConsecLoss = Math.max(maxConsecLoss, cl); }
   });
 
-  // Average trade duration (bars)
   const avgBars = closed.length > 0
     ? closed.reduce((a, t) => a + t.barDuration, 0) / closed.length
     : 0;
 
-  // MAE / MFE averages
   const avgMAE = closed.length > 0 ? closed.reduce((a, t) => a + t.mae, 0) / closed.length : 0;
   const avgMFE = closed.length > 0 ? closed.reduce((a, t) => a + t.mfe, 0) / closed.length : 0;
 
-  // Exit reason breakdown
   const byReason = {};
   closed.forEach(t => {
     if (!byReason[t.exitReason]) byReason[t.exitReason] = { count: 0, pnl: 0 };
@@ -487,8 +574,7 @@ export function calcMetrics(trades, initialCapital, equityCurve, candles) {
     byReason[t.exitReason].pnl += t.pnl;
   });
 
-  // Risk of ruin (simplified Monte Carlo estimate)
-  const riskOfRuin = estimateRiskOfRuin(winRate, avgWin, avgLoss, initialCapital, 0.5);
+  const riskOfRuin = estimateRiskOfRuin(winRate, avgWin, avgLoss, total);
 
   return {
     total,
@@ -525,14 +611,14 @@ function calcDrawdown(equityCurve) {
     if (value > peak) peak = value;
     const dd    = peak - value;
     const ddPct = peak > 0 ? dd / peak * 100 : 0;
-    if (dd > maxDD)  maxDD = dd;
+    if (dd > maxDD)       maxDD    = dd;
     if (ddPct > maxDDPct) maxDDPct = ddPct;
     return { idx, value, drawdown: dd, drawdownPct: ddPct };
   });
   return { maxDrawdown: maxDD, maxDrawdownPct: maxDDPct, drawdownCurve: curve };
 }
 
-function calcSharpe(equityCurve, candles) {
+function calcSharpe(equityCurve, tf = '5m') {
   if (equityCurve.length < 2) return null;
   const returns = [];
   for (let i = 1; i < equityCurve.length; i++) {
@@ -541,80 +627,73 @@ function calcSharpe(equityCurve, candles) {
     if (prev > 0) returns.push((curr - prev) / prev);
   }
   if (returns.length < 2) return null;
-  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const mean     = returns.reduce((a, b) => a + b, 0) / returns.length;
   const variance = returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
-  const std = Math.sqrt(variance);
+  const std      = Math.sqrt(variance);
   if (std === 0) return null;
-  // Annualise assuming ~252 trading days (approximate for crypto: ~365)
-  return (mean / std) * Math.sqrt(365);
+  const barsPerYear = BARS_PER_YEAR[tf] ?? BARS_PER_YEAR['1d'];
+  return (mean / std) * Math.sqrt(barsPerYear);
 }
 
-/**
- * Monte Carlo risk of ruin estimate.
- * rorTarget = fraction of capital that constitutes "ruin" (e.g. 0.5 = 50% loss)
- */
-function estimateRiskOfRuin(winRate, avgWin, avgLoss, capital, rorTarget) {
-  if (avgLoss === 0 || avgWin === 0) return null;
-  // Kelly fraction
-  const w = winRate, l = 1 - w;
-  const b = avgWin / avgLoss;
-  const kelly = (w * b - l) / b;
-  if (kelly <= 0) return 1; // negative expectancy = certain ruin
-
-  // Simplified analytic approximation
-  const a = (l / w) * (avgLoss / avgWin);
-  if (a >= 1) return 1;
-  const ruinLevel = Math.round(capital * rorTarget);
-  // P(ruin) ≈ (a)^(currentCapital / avgLoss)
-  return Math.min(1, Math.pow(a, ruinLevel / avgLoss));
+function estimateRiskOfRuin(winRate, avgWin, avgLoss, totalTrades) {
+  if (avgLoss <= 0 || avgWin <= 0 || winRate <= 0) return null;
+  const lossRate = 1 - winRate;
+  const payoff   = avgWin / avgLoss;
+  const edge     = winRate * payoff - lossRate;
+  if (edge <= 0) return 1; // negative expectancy: ruin is certain
+  const ratio = lossRate / (winRate * payoff);
+  if (ratio >= 1) return 1;
+  // Use 100-trade horizon as the ruin target (practical planning window).
+  const horizon = Math.max(totalTrades, 100);
+  return Math.min(1, Math.pow(ratio, horizon / 100));
 }
 
 // ── Walk-Forward Analysis ─────────────────────────────────────────────────────
 
-/**
- * Splits candles into N windows of (in-sample + out-of-sample).
- * Runs backtest on each window and returns aggregated metrics.
- *
- * @param {Candle[]} candles
- * @param {object}   engineConfig   (minus candles)
- * @param {object}   wfOptions      { windows: 4, inSamplePct: 0.7 }
- */
 export function runWalkForward(candles, engineConfig, wfOptions = {}) {
-  const numWindows  = wfOptions.windows      || 4;
-  const inSamplePct = wfOptions.inSamplePct  || 0.7;
+  const numWindows  = wfOptions.windows     || 4;
+  const inSamplePct = wfOptions.inSamplePct || 0.7;
+  const warmupBars  = engineConfig.warmupBars ?? DEFAULT_WARMUP_BARS;
 
   const totalBars  = candles.length;
   const windowSize = Math.floor(totalBars / numWindows);
-  const results    = [];
+  const minWindow  = warmupBars + 10;
+
+  if (windowSize < minWindow) {
+    console.warn(`[WalkForward] Window size (${windowSize}) is below minimum (${minWindow}). Results may be unreliable.`);
+  }
+
+  const results = [];
+
+  const { onProgress: _ignored, ...safeConfig } = engineConfig;
 
   for (let w = 0; w < numWindows; w++) {
-    const start  = w * windowSize;
-    const end    = Math.min(start + windowSize, totalBars);
-    const split  = start + Math.floor((end - start) * inSamplePct);
+    const start = w * windowSize;
+    const end   = Math.min(start + windowSize, totalBars);
+    const split = start + Math.floor((end - start) * inSamplePct);
 
     const inSample  = candles.slice(start, split);
     const outSample = candles.slice(split, end);
 
-    const isResult  = new BacktestEngine({ ...engineConfig, candles: inSample  }).run();
-    const oosResult = new BacktestEngine({ ...engineConfig, candles: outSample }).run();
+    const isResult  = new BacktestEngine({ ...safeConfig, candles: inSample  }).run();
+    const oosResult = new BacktestEngine({ ...safeConfig, candles: outSample }).run();
 
     results.push({
-      window:     w + 1,
-      inSample:   { bars: inSample.length,  metrics: isResult.metrics  },
-      outSample:  { bars: outSample.length, metrics: oosResult.metrics },
+      window:      w + 1,
+      inSample:    { bars: inSample.length,  metrics: isResult.metrics  },
+      outSample:   { bars: outSample.length, metrics: oosResult.metrics },
       degradation: isResult.metrics && oosResult.metrics
         ? (isResult.metrics.winRate - oosResult.metrics.winRate)
         : null,
     });
   }
 
-  // Aggregate OOS metrics
-  const oosTrades = results.flatMap(r => r.outSample?.metrics ? [r.outSample.metrics] : []);
+  const oosTrades    = results.flatMap(r => r.outSample?.metrics ? [r.outSample.metrics] : []);
   const aggregateOOS = {
-    avgWinRate:   oosTrades.reduce((a, m) => a + m.winRate, 0) / oosTrades.length || 0,
-    avgNetPnl:    oosTrades.reduce((a, m) => a + m.netPnl, 0) / oosTrades.length || 0,
-    avgDrawdown:  oosTrades.reduce((a, m) => a + m.maxDrawdownPct, 0) / oosTrades.length || 0,
-    consistency:  results.filter(r => r.outSample?.metrics?.winRate >= 40).length / numWindows,
+    avgWinRate:  oosTrades.length > 0 ? oosTrades.reduce((a, m) => a + m.winRate, 0) / oosTrades.length : 0,
+    avgNetPnl:   oosTrades.length > 0 ? oosTrades.reduce((a, m) => a + m.netPnl, 0) / oosTrades.length : 0,
+    avgDrawdown: oosTrades.length > 0 ? oosTrades.reduce((a, m) => a + m.maxDrawdownPct, 0) / oosTrades.length : 0,
+    consistency: results.filter(r => r.outSample?.metrics?.winRate >= 40).length / numWindows,
   };
 
   return { windows: results, aggregateOOS };
@@ -622,14 +701,13 @@ export function runWalkForward(candles, engineConfig, wfOptions = {}) {
 
 // ── Batch Strategy Comparison ─────────────────────────────────────────────────
 
-/**
- * Runs all built-in strategies on the same candle set and returns a ranked summary.
- */
 export async function compareStrategies(candles, baseConfig = {}) {
   const results = [];
 
+  const { onProgress: _ignored, candles: _ignoredCandles, ...safeConfig } = baseConfig;
+
   for (const strategy of Object.values(STRATEGIES)) {
-    const engine = new BacktestEngine({ ...baseConfig, candles, strategy });
+    const engine = new BacktestEngine({ ...safeConfig, candles, strategy });
     const result = engine.run();
     results.push({
       strategy: strategy.label,
@@ -637,8 +715,6 @@ export async function compareStrategies(candles, baseConfig = {}) {
       metrics:  result.metrics,
       trades:   result.trades.length,
     });
-
-    // Yield to event loop between strategies
     await new Promise(r => setTimeout(r, 0));
   }
 

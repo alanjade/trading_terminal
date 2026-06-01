@@ -15,22 +15,19 @@ import { LWCChart } from './charts/lwc.js';
 import { backtesterHTML, btRun, btCompare, btExport, initBacktester } from './components/backtester.js';
 import * as dom from './ui/dom.js';
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const CANDLE_WINDOW        = 500;  // rolling candle buffer; must be > EMA-50 warm-up + analysis lookback
+const REPLAY_MIN_INTERVAL  = 50;   // ms floor for replay tick interval
+const REPLAY_BASE_INTERVAL = 400;  // ms at speed=1; divided by speed value
+const SCR_AUTO_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between auto-scans
+const MTF_TOP_N_FROM_SCR   = 20;   // coins imported from screener into MTF panel
+
 let _lwcChart = null;
 
 const SCR_COINS_DEFAULT = SCR_DEFAULT_COINS;
-const SCR_COINS_CURATED = [
-  'BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT','XRPUSDT','DOGEUSDT','ADAUSDT','TRXUSDT','TONUSDT','LINKUSDT',
-  'AVAXUSDT','SUIUSDT','APTUSDT','NEARUSDT','ARBUSDT','OPUSDT','POLUSDT','RENDERUSDT','SEIUSDT','HYPEUSDT',
-  'INJUSDT','TIAUSDT','KASUSDT','ICPUSDT','HBARUSDT','VETUSDT','FILUSDT','ATOMUSDT','ALGOUSDT','XLMUSDT',
-  'FETUSDT','TAOUSDT','AKTUSDT','OCEANUSDT','AGIXUSDT','AIOZUSDT','WLDUSDT','ARKMUSDT','PHAUSDT','NMRUSDT',
-  'PEPEUSDT','SHIBUSDT','BONKUSDT','FLOKIUSDT','WIFUSDT','BRETTUSDT','POPCATUSDT','MOGUSDT','TURBOUSDT','BOMEUSDT',
-  'UNIUSDT','AAVEUSDT','MKRUSDT','CRVUSDT','LDOUSDT','PENDLEUSDT','ENAUSDT','JUPUSDT','RAYUSDT','SUSHIUSDT',
-  'IMXUSDT','GALAUSDT','SANDUSDT','MANAUSDT','AXSUSDT','BEAMUSDT','RONUSDT','ENJUSDT','ILVUSDT','PIXELUSDT',
-  'DOTUSDT','FTMUSDT','MNTUSDT','ZKUSDT','STRKUSDT','RUNEUSDT','QNTUSDT','EOSUSDT','XTZUSDT','KAVAUSDT',
-  'OKBUSDT','CROUSDT','BGBUSDT','KCSUSDT','HTUSDT',
-  'ORDIUSDT','SATSUSDT','PYTHUSDT','WUSDT','DYMUSDT','ZETAUSDT','AEVOUSDT','ETHFIUSDT','BLURUSDT','PORTALUSDT',
-  'JASMYUSDT','THETAUSDT','NEOUSDT','CHZUSDT','COMPUSDT',
-].filter((v, i, a) => a.indexOf(v) === i);
+const SCR_COINS_CURATED = Object.values(SCR_CURATED_TIERS).flat()
+  .filter((v, i, a) => a.indexOf(v) === i);
 
 const TF_ORDER = ['1m','3m','5m','15m','30m','1h','4h','1d'];
 
@@ -52,6 +49,16 @@ let mtfResults = [];
 let mtfFilter  = 'all';
 let mtfRunning = false;
 
+let _audioCtx = null;
+function _getAudioCtx() {
+  if (!_audioCtx || _audioCtx.state === 'closed') {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  return _audioCtx;
+}
+
+let _lastBTResult = null;
+
 Object.assign(window, {
   state,
   fmt, fmtSym, fmtK,
@@ -72,9 +79,9 @@ Object.assign(window, {
   computeAndRender,
   renderScreenerTable,
   clearScreenerFilter: () => {
-  const el = document.getElementById('scr-text-filter');
-  if (el) { el.value = ''; el.dispatchEvent(new Event('input')); }
-},
+    const el = document.getElementById('scr-text-filter');
+    if (el) { el.value = ''; el.dispatchEvent(new Event('input')); }
+  },
 });
 
 const FIB_CONFIGS = [
@@ -92,6 +99,24 @@ let indicatorWorker = null;
 let workerPending   = false;
 let workerQueue     = null;
 let _anchorMode     = null;
+
+const SYM_RE = /^[A-Z0-9]{1,20}$/;
+
+function sanitizeSym(raw) {
+  const cleaned = raw.trim().toUpperCase()
+    .replace(/\//g, '')
+    .replace(/-USDT-SWAP$/, '')   // OKX perpetual format
+    .replace(/-USDT$/, '');       // dash-separated pairs
+  const base = cleaned.endsWith('USDT') ? cleaned : cleaned + 'USDT';
+  if (!SYM_RE.test(base)) return null;
+  return base;
+}
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
 
 export function init() {
   dom.init();
@@ -129,10 +154,14 @@ export function init() {
 
   initSym(state.sym, state.tf);
 
+  document.addEventListener('bt:result', e => {
+    _lastBTResult = e.detail;
+    scheduleRender(RenderPriority.PARTIAL);
+  });
+
   document.addEventListener('keydown', handleKeyDown);
   window.addEventListener('resize', () => _lwcChart?._resize());
 
-  setupChartHover();
   renderWatchlist();
   renderAlerts();
   renderPnL();
@@ -144,26 +173,22 @@ export function init() {
   initBacktester();
   initSearch();
 
-    // Allow searching any symbol directly
-    const searchInp = document.getElementById('sym-search') 
-      || document.querySelector('.search-input')
-      || document.querySelector('input[placeholder*="earch"]');
+  const searchInp = document.getElementById('sym-search');
 
-    if (searchInp) {
-      searchInp.addEventListener('keydown', e => {
-        if (e.key !== 'Enter') return;
-        const raw = searchInp.value.trim().toUpperCase().replace('/', '');
-        if (!raw) return;
-        const sym = raw.endsWith('USDT') ? raw : raw + 'USDT';
-        searchInp.value = '';
-        searchInp.blur();
-        initSym(sym, state.tf);
-        document.querySelector('.chart-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-    }
-    requestAnimationFrame(() => initScreenerFilter());
-    dom.resolveLazy();
+  if (searchInp) {
+    searchInp.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const sym = sanitizeSym(searchInp.value);
+      if (!sym) { showToast('Invalid symbol'); return; }
+      searchInp.value = '';
+      searchInp.blur();
+      initSym(sym, state.tf);
+      document.querySelector('.chart-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   }
+  requestAnimationFrame(() => initScreenerFilter());
+  dom.resolveLazy();
+}
 
 function _ensureAvwapState() {
   if (!Array.isArray(state.avwapVals))         state.avwapVals  = [];
@@ -252,7 +277,7 @@ export async function initSym(sym, tf) {
 function addCandleToState(c) {
   if (state.candles.length > 0 && c.t) {
     const last = state.candles[state.candles.length - 1].t;
-    if (last && c.t <= last) return;
+    if (last && c.t < last) return;
   }
 
   const prevE9 = state.e9, prevE20 = state.e20;
@@ -312,7 +337,7 @@ function addCandleToState(c) {
     _appendAvwapBar(c);
   }
 
-  if (state.candles.length > 150) {
+  if (state.candles.length > CANDLE_WINDOW) {
     state.candles.shift();
     state.e9s.shift();   state.e20s.shift();  state.e50s.shift();
     state.rsiVals.shift();
@@ -441,7 +466,7 @@ function _computeSignalsAndUI(all, atr) {
     dir: state.currentDir, rrRatio: state.rrRatio, feeType: state.feeType,
   });
 
-  updateSuggestionUI(sug, quality, tps, trailStop, atrSize);
+  updateSuggestionUI(sug, quality, tps, trailStop, atrSize, _lastBTResult);
   updateFuturesUI(futMetrics, leverage, entry);
   updateEntryZonesUI(zones);
   updateLegendLabels(latestVwap, cvdLast);
@@ -596,7 +621,7 @@ function updateStructureUI(swings, events) {
   if (el.innerHTML !== html) el.innerHTML = html;
 }
 
-function updateSuggestionUI(sug, quality, tps, trailStop, atrSize) {
+function updateSuggestionUI(sug, quality, tps, trailStop, atrSize, btResult) {
   if (!sug) return;
 
   dom.setText(dom.el['sug-entry'],  fmt(sug.entry));
@@ -631,6 +656,31 @@ function updateSuggestionUI(sug, quality, tps, trailStop, atrSize) {
     dom.setText(dom.el['atr-size-value'],  '$' + atrSize.positionValue.toFixed(2));
     dom.setText(dom.el['atr-size-risk'],   '$' + atrSize.riskUSD.toFixed(2));
     dom.setText(dom.el['atr-stop-dist'],   atrSize.stopDistPct.toFixed(2) + '%');
+  }
+
+  const btEl = dom.el['bt-context'];
+  if (btEl) {
+    const m   = btResult?.metrics;
+    const sym = btResult?.sym;
+    const tf  = btResult?.tf;
+    const matches = m && sym === state.sym && tf === state.tf;
+    btEl.style.display = matches ? 'grid' : 'none';
+    if (matches) {
+      dom.setText(dom.el['bt-ctx-wr'],  m.winRate + '%');
+      dom.setText(dom.el['bt-ctx-exp'], (m.expectancy >= 0 ? '+' : '') + '$' + m.expectancy.toFixed(2));
+      dom.setText(dom.el['bt-ctx-pf'],  m.profitFactor != null ? m.profitFactor.toFixed(2) : '—');
+      dom.setText(dom.el['bt-ctx-dd'],  m.maxDrawdownPct.toFixed(1) + '%');
+      dom.setText(dom.el['bt-ctx-trades'], m.total);
+
+      const wrEl = dom.el['bt-ctx-wr'];
+      if (wrEl) wrEl.style.color = m.winRate >= 55 ? 'var(--green)' : m.winRate >= 45 ? 'var(--amber)' : 'var(--red)';
+
+      const expEl = dom.el['bt-ctx-exp'];
+      if (expEl) expEl.style.color = m.expectancy >= 0 ? 'var(--green)' : 'var(--red)';
+
+      const ddEl = dom.el['bt-ctx-dd'];
+      if (ddEl) ddEl.style.color = m.maxDrawdownPct < 10 ? 'var(--green)' : m.maxDrawdownPct < 20 ? 'var(--amber)' : 'var(--red)';
+    }
   }
 }
 
@@ -786,7 +836,7 @@ function renderAlerts() {
   el.innerHTML = state.alerts.map(a => `
     <div class="alert-item${a.triggered ? ' triggered' : ''}">
       <div class="alert-item-info">
-        <span class="alert-sym">${fmtSym(a.sym)}</span>
+        <span class="alert-sym">${escHtml(fmtSym(a.sym))}</span>
         <span class="alert-cond">${a.dir === 'above' ? 'Above' : 'Below'}</span>
         <span class="alert-price-val">${fmt(a.price)}</span>
         ${a.triggered ? '<span class="alert-status">✓ TRIGGERED</span>' : ''}
@@ -796,9 +846,9 @@ function renderAlerts() {
 }
 
 function wlAdd() {
-  const v = dom.el['wl-inp']?.value.trim().toUpperCase().replace('/', '');
-  if (!v) return;
-  const sym = v.endsWith('USDT') ? v : v + 'USDT';
+  const raw = dom.el['wl-inp']?.value || '';
+  const sym = sanitizeSym(raw);
+  if (!sym) { showToast('Invalid symbol — use letters and numbers only'); return; }
   if (!state.watchlist.includes(sym)) { state.watchlist.push(sym); saveWatchlist(state.watchlist); renderWatchlist(); }
   if (dom.el['wl-inp']) dom.el['wl-inp'].value = '';
 }
@@ -813,9 +863,9 @@ function renderWatchlist() {
   if (!el) return;
   if (!state.watchlist.length) { el.innerHTML = '<span class="wl-empty">No coins added</span>'; return; }
   el.innerHTML = state.watchlist.map(s => `
-    <div class="wl-chip" onclick="loadCoinFromScreener('${s}')">
-      <span>${fmtSym(s)}</span>
-      <button class="wl-chip-del" onclick="event.stopPropagation();wlRemove('${s}')">×</button>
+    <div class="wl-chip" onclick="loadCoinFromScreener('${escHtml(s)}')">
+      <span>${escHtml(fmtSym(s))}</span>
+      <button class="wl-chip-del" onclick="event.stopPropagation();wlRemove('${escHtml(s)}')">×</button>
     </div>`).join('');
 }
 
@@ -859,7 +909,7 @@ function renderPnL() {
   tbody.innerHTML = [...state.pnlTrades].reverse().map(t => `<tr>
     <td style="color:var(--text3)">${t.n}</td>
     <td style="color:var(--text3)">${t.time}</td>
-    <td style="font-weight:700">${t.sym.replace('USDT', '')}</td>
+    <td style="font-weight:700">${escHtml(t.sym.replace('USDT', ''))}</td>
     <td>${t.dir}</td>
     <td class="${t.result === 'win' ? 'pnl-win' : 'pnl-loss'}">${t.result === 'win' ? 'WIN' : 'LOSS'}</td>
     <td class="${t.pnl >= 0 ? 'pnl-win' : 'pnl-loss'}">${(t.pnl >= 0 ? '+' : '') + '$' + Math.abs(t.pnl).toFixed(2)}</td>
@@ -870,11 +920,13 @@ function exportPnL() {
   if (!state.pnlTrades.length) { showToast('No trades to export'); return; }
   const rows = ['#,Time,Symbol,Direction,Result,P&L'];
   state.pnlTrades.forEach(t => rows.push(`${t.n},${t.time},${t.sym},${t.dir},${t.result},${t.pnl.toFixed(2)}`));
-  const a = Object.assign(document.createElement('a'), {
-    href:     URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' })),
+  const url = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+  const a   = Object.assign(document.createElement('a'), {
+    href:     url,
     download: 'session_pnl_' + new Date().toISOString().slice(0, 10) + '.csv',
   });
   a.click();
+  URL.revokeObjectURL(url);
 }
 
 function _scrUpdateCoinCount() {
@@ -929,9 +981,8 @@ function scrSetListMode(mode, btn) {
 function scrAddCustomCoin() {
   const inp = document.getElementById('scr-coin-inp');
   if (!inp) return;
-  const raw = inp.value.trim().toUpperCase();
-  if (!raw) return;
-  const coin = raw.includes('USDT') ? raw : raw + 'USDT';
+  const coin = sanitizeSym(inp.value);
+  if (!coin) { showToast('Invalid symbol — letters and numbers only'); inp.value = ''; return; }
   if (scrCoinList.includes(coin)) { showToast(`${coin} already in list`); inp.value = ''; return; }
   scrCoinList.unshift(coin);
   _scrUpdateCoinCount();
@@ -946,9 +997,9 @@ function scrResetCoins() {
 }
 
 async function scrFetchTopCoins(n, btn) {
-  const fetchAll = (n === null || n === undefined);
+  const fetchAll = (n == null);
+  const origText = btn?.textContent || '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-  const origText = fetchAll ? 'ALL' : `${n}`;
   try {
     let symbols = [];
     const blocked = /UP|DOWN|BULL|BEAR|3L|3S|5L|5S|2L|2S|USDC|BUSD|TUSD|USDP|DAI|UST|FRAX|GUSD/;
@@ -972,8 +1023,8 @@ async function scrFetchTopCoins(n, btn) {
       symbols = filtered.map(t => t.instId.replace('-USDT-SWAP', '') + 'USDT');
 
     } else {
-      const r = await fetch('https://fapi.binance.com/fapi/v1/ticker/24hr', { signal: AbortSignal.timeout(15000) });
-      if (!r.ok) throw new Error('fapi ' + r.status);
+      let r = await fetch('https://api.binance.com/api/v3/ticker/24hr', { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error(`Binance API returned ${r.status}. Try switching to Bybit or OKX.`);
       const d = await r.json();
       let filtered = d
         .filter(t => t.symbol.endsWith('USDT') && !blocked.test(t.symbol))
@@ -1063,7 +1114,6 @@ function renderScreenerTable() {
     return;
   }
 
-  // Apply column sort hints once
   const thead = document.querySelector('#scr-table thead tr');
   if (thead && !thead.dataset.hintsApplied) {
     const hints = [
@@ -1091,18 +1141,18 @@ function renderScreenerTable() {
   const top5 = new Set([...rows].sort((a, b) => b.score - a.score).slice(0, 5).map(r => r.sym));
 
   tbody.innerHTML = rows.map(r => {
+    const safeSym  = escHtml(r.sym);
+    const safeDisp = escHtml(fmtSym(r.sym));
+
     const chgCls   = r.chgPct >= 0 ? 'pos' : 'neg';
     const isTop5   = top5.has(r.sym);
     const rowStyle = isTop5 ? 'background:rgba(0,229,160,0.04);border-left:2px solid rgba(0,229,160,0.5)' : '';
 
-    // Score bar
     const scoreCol = r.score >= 75 ? '#00e5a0' : r.score >= 50 ? '#4da6ff' : r.score >= 30 ? '#ffb82e' : '#3d4460';
 
-    // EMA stack
     const stackCol = r.bullStack ? '#00e5a0' : r.bearStack ? '#ff3d5a' : '#ffb82e';
     const stackTxt = r.bullStack ? '9>20>50' : r.bearStack ? '9<20<50' : '⚠ MIX';
 
-    // MTF — weighted score + higher-TF conflict warning
     const mtfStr = r.availTFs > 0 ? `${r.mtfScore}%` : '—';
     const mtfCol = r.higherTFConflict ? '#ff3d5a'
                  : r.mtfFull          ? '#00e5a0'
@@ -1110,7 +1160,6 @@ function renderScreenerTable() {
                  :                      'var(--text2)';
     const mtfTitle = r.higherTFConflict ? 'Higher TF contradicts signal' : '';
 
-    // Volume — direction-aware marks
     const volCol  = r.volSpike && r.volAligned  ? '#00e5a0'
                   : r.volSpike && r.volOpposed  ? '#ff3d5a'
                   : r.volHot                    ? '#ffb82e'
@@ -1126,12 +1175,10 @@ function renderScreenerTable() {
                   :                               '';
     const volStr  = r.volRatio != null ? r.volRatio.toFixed(1) + 'x' : '—';
 
-    // EMA20 distance
     const distAbs = r.e20dist != null ? Math.abs(r.e20dist) : null;
     const distCol = distAbs != null ? (distAbs <= 1 ? '#00e5a0' : distAbs > 5 ? '#ff3d5a' : 'var(--text2)') : 'var(--text2)';
     const distStr = distAbs != null ? (r.e20dist >= 0 ? '+' : '-') + distAbs.toFixed(1) + '%' : '—';
 
-    // H/L position with signal-aware mark
     const hlPos    = r.hlPos ?? 50;
     const hlBarCol = hlPos >= 80 ? '#ff3d5a' : hlPos <= 20 ? '#00e5a0' : '#4da6ff';
     const hlLabel  = hlPos >= 80 ? 'High' : hlPos <= 20 ? 'Low' : Math.round(hlPos) + '%';
@@ -1142,14 +1189,12 @@ function renderScreenerTable() {
                    :                                         '';
     const hlMarkCol = hlMark === ' ✓' ? '#00e5a0' : hlMark === ' ⚠' ? '#ffb82e' : 'var(--text2)';
 
-    // Trend age
     const ageTxt = r.trendAge != null ? r.trendAge + 'c' : '—';
     const ageCol  = r.trendAge <= 3  ? '#00e5a0'
                   : r.trendAge <= 8  ? '#4da6ff'
                   : r.trendAge <= 40 ? 'var(--text3)'
-                  :                    '#ff3d5a'; // very old trend
+                  :                    '#ff3d5a';
 
-    // Fib column
     let fibTxt = '—', fibCol = 'var(--text3)';
     if (r.fibProximity) {
       const { label, tier, dir, dirLabel } = r.fibProximity;
@@ -1159,7 +1204,6 @@ function renderScreenerTable() {
              :                   'var(--text2)';
     }
 
-    // Extra badges: divergence, momentum accel, HTF conflict
     const badges = [];
     if (r.divAligned)        badges.push(`<span title="RSI divergence confirms signal" style="font-size:8px;color:#00e5a0">Div✓</span>`);
     if (r.divOpposed)        badges.push(`<span title="RSI divergence contradicts signal" style="font-size:8px;color:#ff3d5a">Div⚠</span>`);
@@ -1168,7 +1212,7 @@ function renderScreenerTable() {
 
     return `<tr style="${rowStyle}">
       <td>
-          <span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}${isTop5 ? '⭐' : ''}</span>
+          <span class="scr-sym" onclick="loadCoinFromScreener('${safeSym}')">${safeDisp}${isTop5 ? '⭐' : ''}</span>
           <div style="display:flex;gap:3px;margin-top:2px;flex-wrap:wrap">
             <span style="font-size:8px;color:var(--text3);font-family:var(--mono)">${r.primaryTf || '—'}</span>
             ${badges.join('')}
@@ -1188,7 +1232,8 @@ function renderScreenerTable() {
       </td>
       <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${stackCol}">${stackTxt}</span></td>
       <td title="${mtfTitle}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${mtfCol}">${mtfStr}${r.higherTFConflict ? ' ⚠' : ''}</span></td>
-      <td title="Vol ratio: ${r.volRatio != null ? r.volRatio.toFixed(2) : '—'}x vs 20-bar avg | Cur: ${fmtK(r.curVol)} | Avg: ${fmtK(r.avgVol)}${r.volSpike ? ' | 🔥 Spike (≥2x)' : r.volHot ? ' | ⚡ Hot (≥1.5x)' : ''}${r.volAligned ? ' | ✓ Aligned with signal' : r.volOpposed ? ' | ⚠ Opposed to signal' : ''}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${volCol};background:${volBg};border-radius:6px;padding:1px 5px">${volStr}${volMark}</span></td>      <td><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
+      <td title="Vol ratio: ${r.volRatio != null ? r.volRatio.toFixed(2) : '—'}x vs 20-bar avg | Cur: ${fmtK(r.curVol)} | Avg: ${fmtK(r.avgVol)}${r.volSpike ? ' | 🔥 Spike (≥2x)' : r.volHot ? ' | ⚡ Hot (≥1.5x)' : ''}${r.volAligned ? ' | ✓ Aligned with signal' : r.volOpposed ? ' | ⚠ Opposed to signal' : ''}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${volCol};background:${volBg};border-radius:6px;padding:1px 5px">${volStr}${volMark}</span></td>
+      <td><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
       <td title="24h High: ${fmt(r.hi24)} | Low: ${fmt(r.lo24)} | Position: ${Math.round(hlPos)}% from low${hlMark === ' ✓' ? ' — good entry side' : hlMark === ' ⚠' ? ' — extended, caution' : ''}">
         <div style="position:relative;width:36px;height:6px;background:var(--bg3);border-radius:2px;display:inline-block">
           <div style="position:absolute;left:0;top:0;height:100%;width:${hlPos}%;background:${hlBarCol};border-radius:2px"></div>
@@ -1197,19 +1242,24 @@ function renderScreenerTable() {
       </td>
       <td><span style="font-family:var(--mono);font-size:9px;color:${ageCol}">${ageTxt}</span></td>
       <td><span style="font-family:var(--mono);font-size:9px;color:${fibCol}">${fibTxt}</span></td>
-      <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${r.sym}')">Trade →</button></td>
+      <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${safeSym}')">Trade →</button></td>
     </tr>`;
   }).join('');
 }
 
 function toggleScrAuto() {
   if (scrAutoTimer) {
-    clearInterval(scrAutoTimer);
+    clearTimeout(scrAutoTimer);
     scrAutoTimer = null;
     showToast('Auto-scan off');
   } else {
-    runScreener();
-    scrAutoTimer = setInterval(runScreener, 5 * 60 * 1000);
+    const scheduleNext = async () => {
+      await runScreener();
+      if (scrAutoTimer !== null) {
+        scrAutoTimer = setTimeout(scheduleNext, SCR_AUTO_INTERVAL_MS);
+      }
+    };
+    scrAutoTimer = setTimeout(scheduleNext, 0); // kick off immediately
     showToast('Auto-scan: every 5 minutes');
   }
 }
@@ -1288,7 +1338,7 @@ async function replayLoad() {
   state.replayData   = res.candles;
   state.replayIdx    = 0;
   state.replayActive = false;
-  clearInterval(state.timers.replayTimer); state.timers.replayTimer = null;
+  clearTimeout(state.timers.replayTimer); state.timers.replayTimer = null;
   klineWs?.close(); tradeStream?.close();
   resetCandleState();
   _ensureAvwapState();
@@ -1303,6 +1353,8 @@ async function replayLoad() {
 
 function replayToggle() {
   if (!state.replayData.length) { showToast('Load history first'); return; }
+  clearTimeout(state.timers.replayTimer);
+  state.timers.replayTimer = null;
   state.replayActive = !state.replayActive;
   const btn = dom.el['replay-play-btn'];
   if (btn) { btn.textContent = state.replayActive ? '⏸ Pause' : '▶ Play'; btn.classList.toggle('active', state.replayActive); }
@@ -1318,7 +1370,8 @@ function replayTick() {
   }
   replayStep();
   const speed = +(dom.el['replay-speed']?.value) || 2;
-  state.timers.replayTimer = setTimeout(replayTick, Math.max(50, 400 / speed));
+  clearTimeout(state.timers.replayTimer);
+  state.timers.replayTimer = setTimeout(replayTick, Math.max(REPLAY_MIN_INTERVAL, REPLAY_BASE_INTERVAL / speed));
 }
 
 function replayStep() {
@@ -1347,7 +1400,7 @@ function replayReset() {
 
 function playBeep(freq) {
   try {
-    const ctx  = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx  = _getAudioCtx();
     const osc  = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain); gain.connect(ctx.destination);
@@ -1367,8 +1420,6 @@ export function showToast(msg, cls = '') {
   clearTimeout(t._tid); t._tid = setTimeout(() => t.classList.remove('show'), 3200);
 }
 window.showToast = showToast;
-
-function setupChartHover() {}
 
 function handleKeyDown(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
@@ -1394,9 +1445,8 @@ function _mtfUpdateCoinCount() {
 function mtfAddCoin() {
   const inp = document.getElementById('mtf-coin-inp');
   if (!inp) return;
-  const raw = inp.value.trim().toUpperCase();
-  if (!raw) return;
-  const sym = raw.endsWith('USDT') ? raw : raw + 'USDT';
+  const sym = sanitizeSym(inp.value);
+  if (!sym) { showToast('Invalid symbol — letters and numbers only'); inp.value = ''; return; }
   if (mtfCoins.includes(sym)) { showToast(`${sym} already added`); inp.value = ''; return; }
   mtfCoins.push(sym);
   _mtfUpdateCoinCount();
@@ -1415,7 +1465,7 @@ function mtfLoadFromScreener() {
   if (!scrResults.length) { showToast('Run screener first'); return; }
   const top = [...scrResults]
     .sort((a, b) => b.score - a.score)
-    .slice(0, 20)
+    .slice(0, MTF_TOP_N_FROM_SCR)
     .map(r => r.sym);
   mtfCoins = [...new Set([...mtfCoins, ...top])];
   _mtfUpdateCoinCount();
@@ -1463,14 +1513,12 @@ async function runMTFScan() {
   const activeTFs = TF_ORDER.filter(t => mtfTFs.includes(t));
   const exch      = scrExchange;
 
-  // Check which coins already have fresh cached data from last screener run
   const cached    = new Map(scrResults.map(r => [r.sym, r]));
   const needFetch = mtfCoins.filter(s => !cached.has(s));
   const useCache  = mtfCoins.filter(s =>  cached.has(s));
 
   mtfResults = [];
 
-  // Use cached screener results directly for coins already scanned
   useCache.forEach(sym => {
     const r = cached.get(sym);
     mtfResults.push({
@@ -1486,7 +1534,6 @@ async function runMTFScan() {
     });
   });
 
-  // Fetch fresh data for coins not in screener cache
   if (needFetch.length) {
     const rawData = await batchFetchScreener(needFetch, activeTFs, exch, ({ done, total, sym }) => {
       const pct = Math.round((useCache.length + done) / mtfCoins.length * 100);
@@ -1523,7 +1570,6 @@ async function runMTFScan() {
     });
   }
 
-  // Sort: full confluence first, then by mtfScore desc
   mtfResults.sort((a, b) => {
     if (a.mtfFull && !b.mtfFull) return -1;
     if (!a.mtfFull && b.mtfFull) return  1;
@@ -1544,7 +1590,6 @@ function renderMTFTable() {
 
   const activeTFs = TF_ORDER.filter(t => mtfTFs.includes(t));
 
-  // Build header dynamically based on active TFs
   theadRow.innerHTML = `
     <th>Symbol</th>
     <th>Price</th>
@@ -1554,7 +1599,6 @@ function renderMTFTable() {
     <th></th>
   `;
 
-  // Apply filter
   let rows = mtfResults.filter(r => {
     const bullCount = r.tfs.filter(t => t.signal === 'bull').length;
     const bearCount = r.tfs.filter(t => t.signal === 'bear').length;
@@ -1578,6 +1622,9 @@ function renderMTFTable() {
   const SIG_BG    = { bull: 'rgba(0,229,160,0.12)', bear: 'rgba(255,61,90,0.12)', tang: 'rgba(255,184,46,0.08)', none: 'transparent' };
 
   tbody.innerHTML = rows.map(r => {
+    const safeSym  = escHtml(r.sym);
+    const safeDisp = escHtml(fmtSym(r.sym));
+
     const bullCount  = r.tfs.filter(t => t.signal === 'bull').length;
     const bearCount  = r.tfs.filter(t => t.signal === 'bear').length;
     const total      = r.tfs.filter(t => t.signal !== 'none').length;
@@ -1588,7 +1635,6 @@ function renderMTFTable() {
     const scoreCol   = r.score >= 75 ? '#00e5a0' : r.score >= 50 ? '#4da6ff' : r.score >= 30 ? '#ffb82e' : '#3d4460';
     const cacheTag   = r.fromCache ? `<span title="Using cached screener data" style="font-size:7px;color:var(--text3);font-family:var(--mono)">cached</span>` : '';
 
-    // Per-TF cells — match to activeTFs order
     const tfMap = Object.fromEntries(r.tfs.map(t => [t.tf, t.signal]));
     const tfCells = activeTFs.map(tf => {
       const sig = tfMap[tf] || 'none';
@@ -1600,7 +1646,7 @@ function renderMTFTable() {
 
     return `<tr>
       <td>
-        <span class="scr-sym" onclick="loadCoinFromScreener('${r.sym}')">${fmtSym(r.sym)}</span>
+        <span class="scr-sym" onclick="loadCoinFromScreener('${safeSym}')">${safeDisp}</span>
         <div style="margin-top:2px">${cacheTag}</div>
       </td>
       <td class="scr-price" style="font-size:10px">${fmt(r.price)}</td>
@@ -1614,7 +1660,7 @@ function renderMTFTable() {
           <span style="font-size:9px;color:${scoreCol};font-family:var(--mono);font-weight:700;min-width:24px">${r.score}</span>
         </div>
       </td>
-      <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${r.sym}')">Trade →</button></td>
+      <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${safeSym}')">Trade →</button></td>
     </tr>`;
   }).join('');
 }

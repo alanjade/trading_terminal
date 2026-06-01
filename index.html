@@ -3,50 +3,56 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'nonce-tt2025' https://unpkg.com; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https: wss:; img-src 'self' data:;" />
   <title>TradingTerminal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles/tokens.css" />
   <link rel="stylesheet" href="./styles/components.css" />
   <link rel="stylesheet" href="./styles/layout.css" />
-  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"
+          integrity="sha384-p5uMIFhMnTiJk9NMQbPaXSCFR4kyVAORWHtDOwqPoUP6GqCpAlhuj9NIXY3D51I"
+          crossorigin="anonymous"></script>
 </head>
 <body>
 
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+<!-- ── Top Bar ── -->
 <header class="topbar">
   <div class="topbar-left">
     <span class="topbar-logo">⚡ TT</span>
-    <div id="conn-status" class="conn-status warn">Connecting…</div>
+    <div id="conn-status" class="conn-status warn" role="status">Connecting…</div>
   </div>
   <div class="topbar-center">
-    <div id="sym-group" class="pill-group">
+    <div id="sym-group" class="pill-group" role="group" aria-label="Symbol selector">
       <button class="pill-btn sym-active active" onclick="switchSym('BTCUSDT')">BTC</button>
       <button class="pill-btn" onclick="switchSym('ETHUSDT')">ETH</button>
       <button class="pill-btn" onclick="switchSym('SOLUSDT')">SOL</button>
       <button class="pill-btn" onclick="switchSym('BNBUSDT')">BNB</button>
       <button class="pill-btn" onclick="switchSym('XRPUSDT')">XRP</button>
     </div>
-    <div id="tf-group" class="pill-group">
+    <div id="tf-group" class="pill-group" role="group" aria-label="Timeframe selector">
       <button class="pill-btn" data-tf="1m"  onclick="switchTF('1m')">1m</button>
       <button class="pill-btn active" data-tf="5m"  onclick="switchTF('5m')">5m</button>
       <button class="pill-btn" data-tf="15m" onclick="switchTF('15m')">15m</button>
       <button class="pill-btn" data-tf="1h"  onclick="switchTF('1h')">1h</button>
       <button class="pill-btn" data-tf="4h"  onclick="switchTF('4h')">4h</button>
     </div>
-    <div id="exch-group" class="pill-group">
+    <div id="exch-group" class="pill-group" role="group" aria-label="Exchange selector">
       <button class="pill-btn active sym-active" onclick="switchExchange('bybit',this)">Bybit</button>
       <button class="pill-btn" onclick="switchExchange('binance',this)">Binance</button>
       <button class="pill-btn" onclick="switchExchange('okx',this)">OKX</button>
     </div>
   </div>
   <div class="topbar-right">
-    <div class="price-display">
-      <span id="live-price" class="live-price">—</span>
-      <span id="live-change" class="live-change">—</span>
+    <div class="price-display" aria-label="Live price">
+      <span id="live-price" class="live-price" aria-live="polite">—</span>
+      <span id="live-change" class="live-change" aria-live="polite">—</span>
     </div>
-    <button class="btn btn--icon theme-btn" onclick="toggleTheme()">🌙</button>
+    <button class="btn btn--icon theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">🌙</button>
   </div>
 </header>
 
@@ -58,13 +64,15 @@
     <div id="card-watchlist" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-watchlist')">
         <span class="card-title">📋 Watchlist</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div id="wl-list" class="wl-list"></div>
         <div class="wl-add-row">
-          <input id="wl-inp" class="input-field" placeholder="BTC / BTCUSDT" style="flex:1" onkeydown="if(event.key==='Enter')wlAdd()" />
-          <button class="btn btn--primary btn--icon" onclick="wlAdd()">+</button>
+          <input id="wl-inp" class="input-field" placeholder="BTC / BTCUSDT"
+                 aria-label="Add coin to watchlist"
+                 style="flex:1" onkeydown="if(event.key==='Enter')wlAdd()" />
+          <button class="btn btn--primary btn--icon" onclick="wlAdd()" aria-label="Add to watchlist">+</button>
         </div>
       </div>
     </div>
@@ -72,7 +80,7 @@
     <div id="card-regime" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-regime')">
         <span class="card-title">🧭 Market Regime</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div id="regime-display" class="regime-badge regime-choppy" style="margin-bottom:8px">—</div>
@@ -87,7 +95,7 @@
     <div id="card-structure" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-structure')">
         <span class="card-title">📐 Structure</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="struct-label">Recent Events</div>
@@ -107,7 +115,7 @@
     <div id="card-ema" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-ema')">
         <span class="card-title">📊 Indicators</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="ema-grid">
@@ -136,10 +144,10 @@
             <div class="stat-item"><div class="stat-lbl">VAL</div><div class="stat-val mono" style="font-size:12px" id="vp-val-val">—</div></div>
           </div>
         </div>
-        <div style="display:flex;gap:5px;margin-top:10px;flex-wrap:wrap">
-          <button class="btn btn--icon active" id="overlay-fib-btn" onclick="toggleOverlay('fib',this)">Fib</button>
-          <button class="btn btn--icon active" id="overlay-vp-btn"  onclick="toggleOverlay('vp',this)">VP</button>
-          <button class="btn btn--icon" id="overlay-div-btn" onclick="toggleOverlay('div',this)">Div</button>
+        <div style="display:flex;gap:5px;margin-top:10px;flex-wrap:wrap" role="group" aria-label="Chart overlays">
+          <button class="btn btn--icon active" id="overlay-fib-btn" onclick="toggleOverlay('fib',this)" aria-pressed="true">Fib</button>
+          <button class="btn btn--icon active" id="overlay-vp-btn"  onclick="toggleOverlay('vp',this)"  aria-pressed="true">VP</button>
+          <button class="btn btn--icon"        id="overlay-div-btn" onclick="toggleOverlay('div',this)" aria-pressed="false">Div</button>
         </div>
       </div>
     </div>
@@ -147,15 +155,17 @@
     <div id="card-alerts" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-alerts')">
         <span class="card-title">🔔 Alerts</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="alert-input-row">
-          <input id="alrt-price" class="input-field" type="number" placeholder="Price" style="flex:1" onkeydown="if(event.key==='Enter')addAlert()" />
+          <input id="alrt-price" class="input-field" type="number" placeholder="Price"
+                 aria-label="Alert price"
+                 style="flex:1" onkeydown="if(event.key==='Enter')addAlert()" />
           <button class="btn" id="alrt-dir-btn" onclick="toggleAlertDir()">Above ▲</button>
-          <button class="btn btn--primary btn--icon" onclick="addAlert()">+</button>
+          <button class="btn btn--primary btn--icon" onclick="addAlert()" aria-label="Add alert">+</button>
         </div>
-        <div id="alert-list" class="alert-list"></div>
+        <div id="alert-list" class="alert-list" role="list"></div>
       </div>
     </div>
 
@@ -168,25 +178,26 @@
       <div class="card-header" onclick="toggleCard('card-chart')">
         <span class="card-title">📈 Chart</span>
         <div class="chart-header-right">
-          <button class="btn btn--icon" onclick="setDirection('long')" title="L key">▲ Long</button>
-          <button class="btn btn--icon" onclick="setDirection('short')" title="S key">▼ Short</button>
-          <label class="mono" style="font-size:10px;color:var(--text2)">RR:
-            <input id="inp-rr" type="number" value="2" min="1" max="10" step="0.5"
-              style="width:44px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:4px;padding:2px 5px;font-family:var(--mono);font-size:10px"
-              onchange="setRRRatio(this.value)" />
-          </label>
-          <span class="card-chevron">▾</span>
+          <button class="btn btn--icon" onclick="setDirection('long')"  title="L key" aria-label="Set direction Long">▲ Long</button>
+          <button class="btn btn--icon" onclick="setDirection('short')" title="S key" aria-label="Set direction Short">▼ Short</button>
+          <label for="inp-rr" class="mono" style="font-size:10px;color:var(--text2)">RR:</label>
+          <input id="inp-rr" type="number" value="2" min="1" max="10" step="0.5"
+            aria-label="Risk-reward ratio"
+            style="width:44px;background:var(--bg3);border:1px solid var(--border2);color:var(--text);border-radius:4px;padding:2px 5px;font-family:var(--mono);font-size:10px"
+            onchange="setRRRatio(this.value)" />
+          <span class="card-chevron" aria-hidden="true">▾</span>
         </div>
       </div>
       <div class="card-body" style="padding:0">
-        <div id="lwc-container" style="width:100%;min-height:500px;position:relative"></div>
+        <div id="lwc-container" style="width:100%;min-height:500px;position:relative"
+             role="img" aria-label="Price chart"></div>
       </div>
     </div>
 
     <div id="card-sug" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-sug')">
         <span class="card-title">🎯 Trade Setup</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="sug-header">
@@ -198,6 +209,7 @@
         </div>
         <p id="sug-reason" class="sug-reason"></p>
         <div id="entry-quality-factors" class="entry-quality-factors"></div>
+
         <div class="sug-levels">
           <div class="sug-level sug-entry">
             <span class="sug-level-lbl">Entry</span>
@@ -212,15 +224,18 @@
             <span class="sug-level-val mono" id="sug-target">—</span>
           </div>
         </div>
+
         <div class="tp-row">
           <div class="tp-item"><span class="tp-lbl">TP1 1:1</span><span class="mono" id="tp1-price">—</span><span class="tp-pct" id="tp1-pct"></span></div>
           <div class="tp-item"><span class="tp-lbl">TP2 1:2</span><span class="mono" id="tp2-price">—</span><span class="tp-pct" id="tp2-pct"></span></div>
           <div class="tp-item"><span class="tp-lbl">TP3 1:3</span><span class="mono" id="tp3-price">—</span><span class="tp-pct" id="tp3-pct"></span></div>
         </div>
+
         <div class="atr-trail-row">
           <span class="stat-lbl">ATR Trail Stop (2×)</span>
           <span class="mono" id="atr-trail-val">—</span>
         </div>
+
         <div class="atr-size-section">
           <div class="struct-label">ATR-Based Position Size (1% risk)</div>
           <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-top:6px">
@@ -230,16 +245,36 @@
             <div class="stat-item"><div class="stat-lbl">Stop Dist</div><div class="stat-val" style="font-size:12px" id="atr-stop-dist">—</div></div>
           </div>
         </div>
+
+        <!-- BT context — populated by updateSuggestionUI when sym/tf match last BT run -->
+        <div id="bt-context" class="stat-grid"
+             style="grid-template-columns:repeat(5,1fr);margin-top:10px;display:none;background:rgba(77,166,255,0.06);border-radius:6px;padding:6px;border:1px solid rgba(77,166,255,0.15)"
+             aria-label="Backtest context metrics">
+          <div class="stat-item">
+            <div class="stat-lbl">BT Win%</div>
+            <div class="stat-val mono" id="bt-ctx-wr" style="font-size:12px">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Expect.</div>
+            <div class="stat-val mono" id="bt-ctx-exp" style="font-size:12px">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Prof.F</div>
+            <div class="stat-val mono" id="bt-ctx-pf" style="font-size:12px">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">MaxDD</div>
+            <div class="stat-val mono" id="bt-ctx-dd" style="font-size:12px">—</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-lbl">Trades</div>
+            <div class="stat-val mono" id="bt-ctx-trades" style="font-size:12px">—</div>
+          </div>
+        </div>
+
         <div style="margin-top:10px">
           <button class="btn btn--primary" style="width:100%"
-            onclick="openJournalEntry({
-              sym: document.querySelector('#sym-group .sym-active')?.textContent?.trim()+'USDT',
-              dir: document.querySelector('#sug-dir')?.textContent?.includes('LONG')?'long':'short',
-              tf:  document.querySelector('#tf-group .active')?.dataset?.tf||'5m',
-              entry:  +document.getElementById('sug-entry')?.textContent||0,
-              stop:   +document.getElementById('sug-stop')?.textContent||0,
-              target: +document.getElementById('sug-target')?.textContent||0
-            })">
+                  onclick="openCurrentSetupInJournal()">
             📓 Log to Journal
           </button>
         </div>
@@ -249,7 +284,7 @@
     <div id="card-zones" class="card card--collapsible collapsed">
       <div class="card-header" onclick="toggleCard('card-zones')">
         <span class="card-title">🎯 Entry Zones</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="zones-grid">
@@ -280,51 +315,62 @@
     <div id="card-futures" class="card card--collapsible card--accent-top">
       <div class="card-header" onclick="toggleCard('card-futures')">
         <span class="card-title">⚡ Futures Calc</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="fut-inputs">
           <div class="fut-input-row">
-            <label class="fut-lbl">Capital</label>
+            <label for="inp-capital" class="fut-lbl">Capital</label>
             <div class="fut-input-group">
-              <span class="fut-prefix">$</span>
-              <input id="inp-capital" class="input-field" type="number" value="100" min="1" placeholder="100" oninput="window.computeAndRender?.()" />
+              <span class="fut-prefix" aria-hidden="true">$</span>
+              <input id="inp-capital" class="input-field" type="number" value="100" min="1"
+                     placeholder="100" aria-label="Capital in USD"
+                     oninput="window.computeAndRender?.()" />
             </div>
           </div>
           <div class="fut-input-row">
-            <label class="fut-lbl">Margin</label>
+            <label for="inp-margin" class="fut-lbl">Margin</label>
             <div class="fut-input-group">
-              <span class="fut-prefix">$</span>
-              <input id="inp-margin" class="input-field" type="number" value="20" min="1" placeholder="20" oninput="window.computeAndRender?.()" />
+              <span class="fut-prefix" aria-hidden="true">$</span>
+              <input id="inp-margin" class="input-field" type="number" value="20" min="1"
+                     placeholder="20" aria-label="Margin in USD"
+                     oninput="window.computeAndRender?.()" />
             </div>
           </div>
           <div class="fut-input-row">
-            <label class="fut-lbl">Entry</label>
-            <input id="inp-entry" class="input-field" type="number" placeholder="Auto" oninput="window.computeAndRender?.()" />
+            <label for="inp-entry" class="fut-lbl">Entry</label>
+            <input id="inp-entry" class="input-field" type="number" placeholder="Auto"
+                   aria-label="Entry price (leave blank for auto)"
+                   oninput="window.computeAndRender?.()" />
           </div>
           <div class="fut-input-row">
-            <label class="fut-lbl">Stop</label>
-            <input id="inp-stop" class="input-field" type="number" placeholder="Auto" oninput="window.computeAndRender?.()" />
+            <label for="inp-stop" class="fut-lbl">Stop</label>
+            <input id="inp-stop" class="input-field" type="number" placeholder="Auto"
+                   aria-label="Stop loss price (leave blank for auto)"
+                   oninput="window.computeAndRender?.()" />
           </div>
         </div>
         <div class="lev-section">
           <div class="lev-header">
-            <span class="stat-lbl">Leverage</span>
+            <label for="lev-slider" class="stat-lbl">Leverage</label>
             <div class="lev-value-group">
-              <input id="lev-manual" class="lev-manual-input" type="number" value="10" min="1" max="100" step="1"
-                onchange="document.getElementById('lev-slider').value=this.value;document.getElementById('lev-display').textContent=this.value+'×';state.leverage=+this.value;computeAndRender?computeAndRender():null;" />
-              <span id="lev-display" class="lev-display">10×</span>
+              <input id="lev-manual" class="lev-manual-input" type="number"
+                     value="10" min="1" max="100" step="1"
+                     aria-label="Leverage (manual entry)"
+                     oninput="_onLeverageInput(+this.value)" />
+              <span id="lev-display" class="lev-display" aria-hidden="true">10×</span>
             </div>
           </div>
           <input id="lev-slider" type="range" min="1" max="100" value="10"
-            oninput="this.style.setProperty('--lev-pct',(this.value-1)/99*100+'%');document.getElementById('lev-display').textContent=this.value+'×';document.getElementById('lev-manual').value=this.value;state.leverage=+this.value;computeAndRender?computeAndRender():null;" />
-          <div class="lev-ticks"><span>1×</span><span>10×</span><span>25×</span><span>50×</span><span>100×</span></div>
+                 aria-label="Leverage slider"
+                 oninput="_onLeverageInput(+this.value)" />
+          <div class="lev-ticks" aria-hidden="true"><span>1×</span><span>10×</span><span>25×</span><span>50×</span><span>100×</span></div>
         </div>
         <div class="fee-type-row">
-          <span class="stat-lbl">Fee Type</span>
-          <div class="pill-group" style="width:auto">
+          <span class="stat-lbl" id="fee-type-label">Fee Type</span>
+          <div class="pill-group" style="width:auto" role="group" aria-labelledby="fee-type-label">
             <button class="pill-btn active" onclick="state.feeType='maker';computeAndRender()">Maker 0.02%</button>
-            <button class="pill-btn" onclick="state.feeType='taker';computeAndRender()">Taker 0.05%</button>
+            <button class="pill-btn"        onclick="state.feeType='taker';computeAndRender()">Taker 0.05%</button>
           </div>
         </div>
         <div class="liq-section">
@@ -332,13 +378,15 @@
             <span class="stat-lbl">Liquidation Price</span>
             <span class="mono" id="fv-liq-price">—</span>
           </div>
-          <div class="progress-track"><div id="liq-bar" class="progress-bar" style="width:0%"></div></div>
+          <div class="progress-track" role="meter" aria-label="Liquidation proximity">
+            <div id="liq-bar" class="progress-bar" style="width:0%"></div>
+          </div>
           <div style="display:flex;justify-content:space-between;margin-top:3px">
             <span class="stat-lbl">Dist to Liq</span>
             <span class="mono" id="fv-liq-dist">—</span>
           </div>
         </div>
-        <div id="risk-warn" class="risk-warn" style="display:none"></div>
+        <div id="risk-warn" class="risk-warn" role="alert" style="display:none"></div>
         <div class="stat-grid">
           <div class="stat-item"><div class="stat-lbl">Position</div><div class="stat-val mono" id="fv-pos-size">—</div></div>
           <div class="stat-item good"><div class="stat-lbl">Profit (net)</div><div class="stat-val mono" style="color:var(--green)" id="fv-profit">—</div></div>
@@ -361,19 +409,19 @@
 
     <div id="card-pnl" class="card card--collapsible">
       <div class="card-header" onclick="toggleCard('card-pnl')">
-        <span class="card-title">💹 Session P&L</span>
-        <span class="card-chevron">▾</span>
+        <span class="card-title">💹 Session P&amp;L</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="pnl-summary">
-          <div class="stat-item"><div class="stat-lbl">Net P&L</div><div class="stat-val" id="pnl-net">$0.00</div></div>
+          <div class="stat-item"><div class="stat-lbl">Net P&amp;L</div><div class="stat-val" id="pnl-net">$0.00</div></div>
           <div class="stat-item"><div class="stat-lbl">Wins</div><div class="stat-val" style="color:var(--green)" id="pnl-wins">0</div></div>
           <div class="stat-item"><div class="stat-lbl">Losses</div><div class="stat-val" style="color:var(--red)" id="pnl-losses">0</div></div>
           <div class="stat-item"><div class="stat-lbl">Win Rate</div><div class="stat-val" id="pnl-wr">—</div></div>
         </div>
         <div class="pnl-table-wrap">
-          <table class="pnl-table">
-            <thead><tr><th>#</th><th>Time</th><th>Sym</th><th>Dir</th><th>Result</th><th>P&L</th></tr></thead>
+          <table class="pnl-table" aria-label="Session trade log">
+            <thead><tr><th><!-- # --><abbr title="Trade number">#</abbr></th><th>Time</th><th>Sym</th><th>Dir</th><th>Result</th><th>P&amp;L</th></tr></thead>
             <tbody id="pnl-tbody">
               <tr><td colspan="6" class="pnl-empty">No trades logged</td></tr>
             </tbody>
@@ -399,7 +447,7 @@
       <div style="display:flex;gap:6px;align-items:center">
         <button class="btn btn--icon" style="font-size:9px" onclick="event.stopPropagation();exportJournal()">⬇ Export</button>
         <button class="btn btn--primary btn--icon" onclick="event.stopPropagation();openJournalEntry({})">+ Log</button>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
     </div>
     <div class="card-body">
@@ -407,33 +455,65 @@
         <div id="jrn-form" class="jrn-form-panel">
           <div class="jrn-form-title">New Trade Entry</div>
           <div class="jrn-form-grid">
-            <div class="jrn-form-row"><label class="fut-lbl">Symbol</label><input id="jrn-sym" class="input-field" placeholder="BTCUSDT" /></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Direction</label>
-              <select id="jrn-dir" class="input-field"><option value="long">▲ Long</option><option value="short">▼ Short</option></select></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Timeframe</label>
+            <div class="jrn-form-row">
+              <label for="jrn-sym" class="fut-lbl">Symbol</label>
+              <input id="jrn-sym" class="input-field" placeholder="BTCUSDT" />
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-dir" class="fut-lbl">Direction</label>
+              <select id="jrn-dir" class="input-field">
+                <option value="long">▲ Long</option>
+                <option value="short">▼ Short</option>
+              </select>
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-tf" class="fut-lbl">Timeframe</label>
               <select id="jrn-tf" class="input-field">
                 <option value="1m">1m</option><option value="5m" selected>5m</option>
                 <option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option>
-              </select></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Entry</label><input id="jrn-entry" class="input-field" type="number" placeholder="0.00" /></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Stop Loss</label><input id="jrn-stop" class="input-field" type="number" placeholder="0.00" /></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Target</label><input id="jrn-target" class="input-field" type="number" placeholder="0.00" /></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Exit Price</label><input id="jrn-exit" class="input-field" type="number" placeholder="Optional" /></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Setup Type</label>
+              </select>
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-entry" class="fut-lbl">Entry</label>
+              <input id="jrn-entry" class="input-field" type="number" placeholder="0.00" />
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-stop" class="fut-lbl">Stop Loss</label>
+              <input id="jrn-stop" class="input-field" type="number" placeholder="0.00" />
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-target" class="fut-lbl">Target</label>
+              <input id="jrn-target" class="input-field" type="number" placeholder="0.00" />
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-exit" class="fut-lbl">Exit Price</label>
+              <input id="jrn-exit" class="input-field" type="number" placeholder="Optional" />
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-setup" class="fut-lbl">Setup Type</label>
               <select id="jrn-setup" class="input-field">
-                <option value="ema_pullback">EMA Pullback</option><option value="breakout">Breakout</option>
-                <option value="reversal">Reversal</option><option value="mean_revert">Mean Revert</option>
-                <option value="momentum">Momentum</option><option value="other">Other</option>
-              </select></div>
-            <div class="jrn-form-row"><label class="fut-lbl">Emotion</label>
+                <option value="ema_pullback">EMA Pullback</option>
+                <option value="breakout">Breakout</option>
+                <option value="reversal">Reversal</option>
+                <option value="mean_revert">Mean Revert</option>
+                <option value="momentum">Momentum</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="jrn-form-row">
+              <label for="jrn-emotion" class="fut-lbl">Emotion</label>
               <select id="jrn-emotion" class="input-field">
-                <option value="confident">😎 Confident</option><option value="neutral" selected>😐 Neutral</option>
-                <option value="fomo">😰 FOMO</option><option value="fearful">😨 Fearful</option>
-                <option value="revenge">😡 Revenge</option><option value="bored">😴 Bored</option>
-              </select></div>
+                <option value="confident">😎 Confident</option>
+                <option value="neutral" selected>😐 Neutral</option>
+                <option value="fomo">😰 FOMO</option>
+                <option value="fearful">😨 Fearful</option>
+                <option value="revenge">😡 Revenge</option>
+                <option value="bored">😴 Bored</option>
+              </select>
+            </div>
           </div>
-          <div class="jrn-section-label">Mistakes (select all that apply)</div>
-          <div class="jrn-mistakes-group">
+          <div class="jrn-section-label" id="mistakes-label">Mistakes (select all that apply)</div>
+          <div class="jrn-mistakes-group" role="group" aria-labelledby="mistakes-label">
             <button class="jrn-mistake-btn" data-id="early_entry">⚡ Early Entry</button>
             <button class="jrn-mistake-btn" data-id="late_entry">🐢 Late Entry</button>
             <button class="jrn-mistake-btn" data-id="wide_stop">📏 Wide Stop</button>
@@ -443,9 +523,12 @@
             <button class="jrn-mistake-btn" data-id="fomo">😰 FOMO</button>
             <button class="jrn-mistake-btn active" data-id="none">✅ None</button>
           </div>
-          <div class="jrn-section-label">Notes</div>
+          <div class="jrn-section-label">
+            <label for="jrn-notes">Notes</label>
+          </div>
           <textarea id="jrn-notes" class="input-field" rows="3"
-            placeholder="Setup reasoning, what went wrong, lessons learned…" style="resize:vertical"></textarea>
+            placeholder="Setup reasoning, what went wrong, lessons learned…"
+            style="resize:vertical"></textarea>
           <input type="hidden" id="jrn-regime" />
           <input type="hidden" id="jrn-score" />
           <div style="display:flex;gap:8px;margin-top:12px">
@@ -455,13 +538,10 @@
         </div>
         <div class="jrn-main">
           <div class="jrn-filter-row">
-            <div class="pill-group">
-              <button class="pill-btn active"
-                onclick="renderJournalList('all');this.closest('.pill-group').querySelectorAll('.pill-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">All</button>
-              <button class="pill-btn"
-                onclick="renderJournalList('win');this.closest('.pill-group').querySelectorAll('.pill-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">Wins</button>
-              <button class="pill-btn"
-                onclick="renderJournalList('loss');this.closest('.pill-group').querySelectorAll('.pill-btn').forEach(b=>b.classList.remove('active'));this.classList.add('active')">Losses</button>
+            <div class="pill-group" role="group" aria-label="Journal filter">
+              <button class="pill-btn active" onclick="_jrnFilter('all',this)">All</button>
+              <button class="pill-btn"        onclick="_jrnFilter('win',this)">Wins</button>
+              <button class="pill-btn"        onclick="_jrnFilter('loss',this)">Losses</button>
             </div>
           </div>
           <div id="jrn-stats" class="jrn-stats-section"></div>
@@ -478,36 +558,42 @@
       <div style="display:flex;gap:6px;align-items:center">
         <button id="scr-run-btn" class="btn btn--primary btn--icon" onclick="event.stopPropagation();runScreener()">▶ Scan</button>
         <button class="btn btn--icon" onclick="event.stopPropagation();toggleScrAuto()" id="scr-auto-btn">Auto</button>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
     </div>
     <div class="card-body">
 
       <!-- Coin list mode + custom coin -->
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px">
-        <span class="stat-lbl">List:</span>
-        <button class="pill-btn scr-list-btn active" onclick="scrSetListMode('default',this)">Default</button>
-        <button class="pill-btn scr-list-btn" onclick="scrSetListMode('curated',this)">Curated</button>
+        <span class="stat-lbl" id="list-mode-label">List:</span>
+        <div role="group" aria-labelledby="list-mode-label" style="display:contents">
+          <button class="pill-btn scr-list-btn active" onclick="scrSetListMode('default',this)">Default</button>
+          <button class="pill-btn scr-list-btn"        onclick="scrSetListMode('curated',this)">Curated</button>
+        </div>
         <span id="scr-coin-count" class="stat-lbl" style="margin-left:2px">— coins</span>
         <div style="display:flex;gap:4px;margin-left:auto">
-          <input id="scr-coin-inp" class="input-field" placeholder="Add coin" style="width:88px;font-size:10px"
-            onkeydown="if(event.key==='Enter')scrAddCustomCoin()" />
-          <button class="btn btn--icon" style="font-size:9px" onclick="scrAddCustomCoin()" title="Add coin">+</button>
-          <button class="btn btn--icon" style="font-size:9px" onclick="scrResetCoins()" title="Reset list">↺</button>
+          <input id="scr-coin-inp" class="input-field" placeholder="Add coin"
+                 aria-label="Add custom coin to screener list"
+                 style="width:88px;font-size:10px"
+                 onkeydown="if(event.key==='Enter')scrAddCustomCoin()" />
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrAddCustomCoin()" title="Add coin" aria-label="Add coin">+</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrResetCoins()"    title="Reset list" aria-label="Reset coin list">↺</button>
         </div>
       </div>
 
       <!-- Fetch top-N -->
       <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:8px">
-        <span class="stat-lbl">Fetch top:</span>
-        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(50,this)">50</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(100,this)">100</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(200,this)">200</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(null,this)">ALL</button>
+        <span class="stat-lbl" id="fetch-top-label">Fetch top:</span>
+        <div role="group" aria-labelledby="fetch-top-label" style="display:contents">
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(50,this)">50</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(100,this)">100</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(200,this)">200</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(null,this)">ALL</button>
+        </div>
       </div>
 
       <!-- Tier legend (curated mode only) -->
-      <div id="scr-tier-legend" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+      <div id="scr-tier-legend" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:8px" aria-hidden="true">
         <span class="stat-lbl" style="width:100%;margin-bottom:2px">Sectors:</span>
         <span class="signal-badge" style="font-size:8px">T1 Top</span>
         <span class="signal-badge" style="font-size:8px">T2 Major</span>
@@ -522,7 +608,7 @@
       </div>
 
       <!-- TF selector -->
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px" role="group" aria-label="Screener timeframes">
         <span class="stat-lbl" style="margin-right:4px">TFs:</span>
         <button class="pill-btn active" onclick="setScrTF('5m',this)">5m</button>
         <button class="pill-btn active" onclick="setScrTF('15m',this)">15m</button>
@@ -530,8 +616,16 @@
         <button class="pill-btn active" onclick="setScrTF('4h',this)">4h</button>
       </div>
 
-      <!-- Filter buttons — all keys from applyScreenerFilters -->
-      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+      <!-- Text search filter -->
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <label for="scr-text-filter" class="sr-only">Filter by symbol</label>
+        <input id="scr-text-filter" class="input-field" placeholder="Filter by symbol…"
+               style="flex:1;font-size:10px" oninput="renderScreenerTable()" />
+        <button class="btn btn--icon" style="font-size:9px" onclick="clearScreenerFilter()" aria-label="Clear symbol filter">✕</button>
+      </div>
+
+      <!-- Signal filters -->
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px" role="group" aria-label="Signal filters">
         <button class="pill-btn scr-filter-btn active" onclick="scrSetFilter('all',this)">All</button>
         <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('bull',this)">Bull</button>
         <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('bear',this)">Bear</button>
@@ -557,32 +651,32 @@
       </div>
 
       <!-- Progress -->
-      <div id="scr-progress" class="scr-progress" style="display:none">
+      <div id="scr-progress" class="scr-progress" style="display:none" role="status" aria-live="polite">
         <div class="progress-track" style="margin-bottom:4px">
           <div id="scr-progress-bar" class="progress-bar" style="width:0%"></div>
         </div>
         <span id="scr-progress-lbl" class="stat-lbl">0/0</span>
       </div>
 
-      <!-- Results table — 14 cols: sym price chg signal rsi score stack mtf vol dist h/l age fib trade -->
-      <div class="scr-table-wrap">
-        <table id="scr-table" class="scr-table">
+      <!-- Results table — 14 cols -->
+      <div class="scr-table-wrap" role="region" aria-label="Screener results" tabindex="0">
+        <table id="scr-table" class="scr-table" aria-label="Screener results table">
           <thead>
             <tr>
-              <th onclick="scrSort('sym')" title="Symbol · primary scan TF shown below">Symbol / TF</th>
-              <th onclick="scrSort('price')">Price</th>
-              <th onclick="scrSort('chg')">Chg%</th>
-              <th onclick="scrSort('signal')">Signal</th>
-              <th onclick="scrSort('rsi')">RSI</th>
-              <th onclick="scrSort('score')">Score ↓</th>
-              <th onclick="scrSort('stack')">Stack</th>
-              <th onclick="scrSort('mtf')" title="Weighted by TF — higher TFs count more">MTF</th>
-              <th onclick="scrSort('vol')" title="Vol ratio · ✓ aligned with signal · ⚠ opposed">Vol</th>
-              <th onclick="scrSort('dist')">Dist</th>
-              <th onclick="scrSort('hlpos')" title="H/L position · ✓ good entry side · ⚠ extended">H/L</th>
-              <th onclick="scrSort('age')" title="Candles since last EMA9/20 cross">Age</th>
-              <th onclick="scrSort('fib')" title="Nearest Fib level">Fib</th>
-              <th></th>
+              <th onclick="scrSort('sym')"   scope="col" title="Symbol · primary scan TF shown below">Symbol / TF</th>
+              <th onclick="scrSort('price')" scope="col">Price</th>
+              <th onclick="scrSort('chg')"   scope="col">Chg%</th>
+              <th onclick="scrSort('signal')" scope="col">Signal</th>
+              <th onclick="scrSort('rsi')"   scope="col">RSI</th>
+              <th onclick="scrSort('score')" scope="col">Score ↓</th>
+              <th onclick="scrSort('stack')" scope="col">Stack</th>
+              <th onclick="scrSort('mtf')"   scope="col" title="Weighted by TF — higher TFs count more">MTF</th>
+              <th onclick="scrSort('vol')"   scope="col" title="Vol ratio · ✓ aligned with signal · ⚠ opposed">Vol</th>
+              <th onclick="scrSort('dist')"  scope="col">Dist</th>
+              <th onclick="scrSort('hlpos')" scope="col" title="H/L position · ✓ good entry side · ⚠ extended">H/L</th>
+              <th onclick="scrSort('age')"   scope="col" title="Candles since last EMA9/20 cross">Age</th>
+              <th onclick="scrSort('fib')"   scope="col" title="Nearest Fib level">Fib</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody id="scr-tbody">
@@ -593,52 +687,37 @@
     </div>
   </div>
 
-  <!-- Replay Engine -->
-  <div id="card-replay" class="card card--collapsible collapsed">
-    <div class="card-header" onclick="toggleCard('card-replay')">
-      <span class="card-title">⏪ Replay</span>
-      <span class="card-chevron">▾</span>
-    </div>
-    <div class="card-body">
-      <div class="replay-controls">
-        <button id="replay-load-btn" class="btn" onclick="replayLoad()">⬇ Load</button>
-        <button id="replay-play-btn" class="btn" onclick="replayToggle()" disabled>▶ Play</button>
-        <button class="btn btn--icon" onclick="replayStep()">⏭</button>
-        <button class="btn btn--danger btn--icon" onclick="replayReset()">↺</button>
-        <label class="fut-lbl">Speed:
-          <input id="replay-speed" type="range" min="1" max="10" value="2" style="width:80px;vertical-align:middle" />
-        </label>
-        <span id="replay-progress-lbl" class="stat-lbl mono">0 / 0</span>
-      </div>
-    </div>
-  </div>
-
   <!-- MTF Confluence -->
   <div id="card-mtf" class="card card--collapsible collapsed">
     <div class="card-header" onclick="toggleCard('card-mtf')">
       <span class="card-title">🔀 MTF Confluence</span>
       <div style="display:flex;gap:6px;align-items:center">
         <button class="btn btn--primary btn--icon" id="mtf-scan-btn" onclick="event.stopPropagation();runMTFScan()">▶ Scan</button>
-        <span class="card-chevron">▾</span>
+        <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
     </div>
     <div class="card-body">
 
       <!-- Coin input -->
       <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-        <input id="mtf-coin-inp" class="input-field" placeholder="Add coin e.g. BTC" style="width:110px;font-size:10px"
-          onkeydown="if(event.key==='Enter')mtfAddCoin()" />
-        <button class="btn btn--icon" style="font-size:9px" onclick="mtfAddCoin()">+</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadFromScreener()" title="Load top scored coins from last screener scan">⬇ From Screener</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadWatchlist()" title="Load watchlist coins">⬇ Watchlist</button>
+        <label for="mtf-coin-inp" class="sr-only">Add coin to MTF scan</label>
+        <input id="mtf-coin-inp" class="input-field" placeholder="Add coin e.g. BTC"
+               style="width:110px;font-size:10px"
+               onkeydown="if(event.key==='Enter')mtfAddCoin()" />
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfAddCoin()" aria-label="Add coin">+</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadFromScreener()"
+                title="Load top scored coins from last screener scan">⬇ From Screener</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadWatchlist()"
+                title="Load watchlist coins">⬇ Watchlist</button>
         <button class="btn btn--icon" style="font-size:9px" onclick="mtfClearCoins()">✕ Clear</button>
         <span id="mtf-coin-count" class="stat-lbl">0 coins</span>
       </div>
 
       <!-- TF toggles -->
-      <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;flex-wrap:wrap"
+           role="group" aria-label="MTF timeframes">
         <span class="stat-lbl" style="margin-right:4px">TFs:</span>
-        <button class="pill-btn" id="mtf-tf-1m"  onclick="toggleMTFTf('1m',this)">1m</button>
+        <button class="pill-btn"        id="mtf-tf-1m"  onclick="toggleMTFTf('1m',this)">1m</button>
         <button class="pill-btn active" id="mtf-tf-5m"  onclick="toggleMTFTf('5m',this)">5m</button>
         <button class="pill-btn active" id="mtf-tf-15m" onclick="toggleMTFTf('15m',this)">15m</button>
         <button class="pill-btn active" id="mtf-tf-30m" onclick="toggleMTFTf('30m',this)">30m</button>
@@ -646,8 +725,8 @@
         <button class="pill-btn active" id="mtf-tf-4h"  onclick="toggleMTFTf('4h',this)">4h</button>
       </div>
 
-      <!-- Filter -->
-      <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap">
+      <!-- Filters -->
+      <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap" role="group" aria-label="MTF filters">
         <button class="pill-btn scr-filter-btn active" onclick="mtfSetFilter('all',this)">All</button>
         <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('full_bull',this)">Full Bull</button>
         <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('full_bear',this)">Full Bear</button>
@@ -656,20 +735,18 @@
       </div>
 
       <!-- Progress -->
-      <div id="mtf-progress" style="display:none;margin-bottom:6px">
+      <div id="mtf-progress" style="display:none;margin-bottom:6px" role="status" aria-live="polite">
         <div class="progress-track" style="margin-bottom:4px">
           <div id="mtf-progress-bar" class="progress-bar" style="width:0%"></div>
         </div>
         <span id="mtf-progress-lbl" class="stat-lbl">0/0</span>
       </div>
 
-      <!-- Table -->
-      <div class="scr-table-wrap">
-        <table id="mtf-table" class="scr-table">
+      <!-- Table — headers populated dynamically by renderMTFTable -->
+      <div class="scr-table-wrap" role="region" aria-label="MTF confluence results" tabindex="0">
+        <table id="mtf-table" class="scr-table" aria-label="MTF confluence table">
           <thead>
-            <tr id="mtf-thead-row">
-              <!-- populated dynamically -->
-            </tr>
+            <tr id="mtf-thead-row"></tr>
           </thead>
           <tbody id="mtf-tbody">
             <tr><td colspan="8" class="scr-empty">Add coins and scan, or load from screener</td></tr>
@@ -680,21 +757,87 @@
     </div>
   </div>
 
-  <!-- Backtester (populated at runtime) -->
+  <!-- Replay Engine -->
+  <div id="card-replay" class="card card--collapsible collapsed">
+    <div class="card-header" onclick="toggleCard('card-replay')">
+      <span class="card-title">⏪ Replay</span>
+      <span class="card-chevron" aria-hidden="true">▾</span>
+    </div>
+    <div class="card-body">
+      <div class="replay-controls">
+        <button id="replay-load-btn" class="btn" onclick="replayLoad()">⬇ Load</button>
+        <button id="replay-play-btn" class="btn" onclick="replayToggle()" disabled>▶ Play</button>
+        <button class="btn btn--icon" onclick="replayStep()" aria-label="Step one bar">⏭</button>
+        <button class="btn btn--danger btn--icon" onclick="replayReset()" aria-label="Reset replay">↺</button>
+        <!-- FIX: replay speed label now uses for/id association. -->
+        <label for="replay-speed" class="fut-lbl">Speed:</label>
+        <input id="replay-speed" type="range" min="1" max="10" value="2"
+               style="width:80px;vertical-align:middle"
+               aria-label="Replay speed" />
+        <span id="replay-progress-lbl" class="stat-lbl mono" aria-live="polite">0 / 0</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Backtester (populated at runtime by backtesterHTML()) -->
   <div id="bt-placeholder"></div>
 
 </div>
 
-<div class="kbd-legend">
+<div class="kbd-legend" aria-label="Keyboard shortcuts">
   <span>L: Long</span> · <span>S: Short</span> · <span>R: Run screener</span> ·
   <span>T: Theme</span> · <span>A: Anchor VWAP</span> · <span>X: Clear anchor</span> ·
   <span>[ / ]: RR ratio</span> ·
   <span>Drawing: T=Trendline H=HRay F=Fib N=Note Esc=Select</span>
 </div>
 
+<style>
+  .sr-only {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+  }
+</style>
+
 <script type="module" src="./main.js"></script>
 
-<script>
+<script nonce="tt2025">
+function openCurrentSetupInJournal() {
+  const sym   = window.state?.sym || '';
+  const tf    = window.state?.tf  || '5m';
+  const dir   = document.getElementById('sug-dir')?.textContent?.includes('LONG') ? 'long' : 'short';
+  const entry = parseFloat(document.getElementById('sug-entry')?.textContent) || 0;
+  const stop  = parseFloat(document.getElementById('sug-stop')?.textContent)  || 0;
+  const target= parseFloat(document.getElementById('sug-target')?.textContent)|| 0;
+  if (window.openJournalEntry) {
+    window.openJournalEntry({ sym, dir, tf, entry, stop, target });
+  }
+}
+
+function _onLeverageInput(val) {
+  const v = Math.min(100, Math.max(1, val || 1));
+  const slider  = document.getElementById('lev-slider');
+  const manual  = document.getElementById('lev-manual');
+  const display = document.getElementById('lev-display');
+  if (slider)  slider.value  = v;
+  if (manual)  manual.value  = v;
+  if (display) display.textContent = v + '×';
+  if (slider)  slider.style.setProperty('--lev-pct', ((v - 1) / 99 * 100) + '%');
+  if (window.state) window.state.leverage = v;
+  if (window.computeAndRender) window.computeAndRender();
+}
+
+function _jrnFilter(filter, btn) {
+  btn.closest('.pill-group').querySelectorAll('.pill-btn')
+    .forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (window.renderJournalList) window.renderJournalList(filter);
+}
+
 document.addEventListener('click', e => {
   const btn = e.target.closest('.jrn-mistake-btn');
   if (!btn) return;

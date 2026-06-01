@@ -8,12 +8,18 @@ import { fetchKlinesFallback } from '../services/exchange.js';
 import { fmt, fmtK } from '../utils/helpers.js';
 import { state } from '../state/store.js';
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const MIN_CANDLES_BACKTEST  = 80;   // minimum candles required to run a backtest
+const MIN_CANDLES_WALKFWD   = 200;  // minimum candles required for walk-forward
+const EQUITY_PADDING_FACTOR = 0.005; // 0.5% headroom above/below equity curve
+const TRADE_LOG_MAX_ROWS    = 50;   // max trades shown in the log table
+const WALKFWD_WINDOWS       = 4;
+
 // ── State ─────────────────────────────────────────────────────────────────────
 
-let _result     = null;
-let _isRunning  = false;
-let _equityCtx  = null;
-let _ddCtx      = null;
+let _result    = null;
+let _isRunning = false;
 
 // ── HTML Template ─────────────────────────────────────────────────────────────
 
@@ -102,7 +108,7 @@ export function backtesterHTML() {
         </label>
         <label class="bt-toggle">
           <input type="checkbox" id="bt-walkfwd" />
-          <span>Walk-forward (4 windows)</span>
+          <span>Walk-forward (${WALKFWD_WINDOWS} windows)</span>
         </label>
       </div>
 
@@ -171,9 +177,10 @@ export async function btRun() {
   showProgress(true, 0);
 
   try {
-    // Get candles
-    const sym = document.getElementById('bt-sym')?.value || state.sym;
-    const tf  = document.getElementById('bt-tf')?.value  || state.tf;
+    const symSel = document.getElementById('bt-sym')?.value;
+    const tfSel  = document.getElementById('bt-tf')?.value;
+    const sym    = symSel || state.sym;
+    const tf     = tfSel  || state.tf;
 
     let candles;
     if (sym === state.sym && tf === state.tf) {
@@ -183,12 +190,12 @@ export async function btRun() {
       candles = res?.candles || [];
     }
 
-    if (candles.length < 80) {
+    if (candles.length < MIN_CANDLES_BACKTEST) {
       showToast('Not enough candle data for backtest');
       return;
     }
 
-    const stratId = document.getElementById('bt-strategy')?.value || 'ema_pullback';
+    const stratId  = document.getElementById('bt-strategy')?.value || 'ema_pullback';
     const strategy = Object.values(STRATEGIES).find(s => s.id === stratId) || STRATEGIES.EMA_PULLBACK;
 
     const config = {
@@ -204,7 +211,7 @@ export async function btRun() {
       onProgress:  pct => showProgress(true, pct),
     };
 
-    // Run in yielded chunks to avoid blocking UI
+    // Run in yielded chunk to avoid blocking UI
     await new Promise(r => setTimeout(r, 10));
     const engine = new BacktestEngine(config);
     _result = engine.run();
@@ -212,13 +219,19 @@ export async function btRun() {
     // Walk-forward
     const doWF = document.getElementById('bt-walkfwd')?.checked;
     let wfResult = null;
-    if (doWF && candles.length > 200) {
+    if (doWF && candles.length > MIN_CANDLES_WALKFWD) {
       showProgress(true, 90);
       await new Promise(r => setTimeout(r, 10));
       wfResult = runWalkForward(candles, config);
     }
 
     renderResults(_result, wfResult);
+
+    if (_result?.metrics) {
+      document.dispatchEvent(new CustomEvent('bt:result', {
+        detail: { metrics: _result.metrics, sym, tf },
+      }));
+    }
 
   } catch(err) {
     console.error('[Backtest]', err);
@@ -239,7 +252,7 @@ export async function btCompare() {
 
   try {
     const candles = [...state.candles];
-    if (candles.length < 80) { showToast('Need more candle data'); return; }
+    if (candles.length < MIN_CANDLES_BACKTEST) { showToast('Need more candle data'); return; }
 
     const config = {
       capital:    +document.getElementById('bt-capital')?.value || 1000,
@@ -250,6 +263,9 @@ export async function btCompare() {
     const results = await compareStrategies(candles, config);
     renderCompareTable(results);
 
+  } catch(err) {
+    console.error('[Backtest Compare]', err);
+    showToast('Compare error: ' + err.message);
   } finally {
     _isRunning = false;
     showProgress(false);
@@ -263,16 +279,13 @@ function renderResults(result, wfResult) {
 
   document.getElementById('bt-results').style.display = 'block';
 
-  // Metrics grid
   renderMetricsGrid(metrics);
 
-  // Charts
   requestAnimationFrame(() => {
     drawEquityCurve(equityCurve, result.initialCapital);
     drawDrawdownCurve(metrics?.drawdownCurve);
   });
 
-  // Walk-forward
   if (wfResult) {
     document.getElementById('bt-wf-section').style.display = 'block';
     renderWFTable(wfResult);
@@ -280,7 +293,6 @@ function renderResults(result, wfResult) {
     document.getElementById('bt-wf-section').style.display = 'none';
   }
 
-  // Trade log
   renderTradeLog(trades);
 }
 
@@ -324,12 +336,16 @@ function renderTradeLog(trades) {
     return;
   }
 
-  const shown = trades.slice(-50).reverse(); // show last 50
+  const total = trades.length;
+  const shown = trades.slice(-TRADE_LOG_MAX_ROWS).reverse();
+
   tbody.innerHTML = shown.map((t, i) => {
     const cls = t.pnl > 0 ? 'pnl-win' : 'pnl-loss';
-    const dir = t.dir === 'long' ? '<span style="color:#00e5a0">▲ L</span>' : '<span style="color:#ff3d5a">▼ S</span>';
+    const dir = t.dir === 'long'
+      ? '<span style="color:#00e5a0">▲ L</span>'
+      : '<span style="color:#ff3d5a">▼ S</span>';
     return `<tr>
-      <td style="color:var(--text3)">${trades.length - i}</td>
+      <td style="color:var(--text3)">${total - i}</td>
       <td style="color:var(--text3)">${t.entryIdx}</td>
       <td>${dir}</td>
       <td class="mono" style="font-size:10px">${fmt(t.entryPrice)}</td>
@@ -360,10 +376,10 @@ function renderCompareTable(results) {
         </thead>
         <tbody>
           ${results.map((r, i) => {
-            const m = r.metrics;
+            const m    = r.metrics;
             const best = i === 0;
-            return `<tr style="${best?'background:rgba(0,229,160,0.04)':''}">
-              <td style="font-weight:700">${best?'⭐ ':''}${r.strategy}</td>
+            return `<tr style="${best ? 'background:rgba(0,229,160,0.04)' : ''}">
+              <td style="font-weight:700">${best ? '⭐ ' : ''}${r.strategy}</td>
               <td>${m?.total ?? '—'}</td>
               <td style="color:${(m?.winRate||0)>=50?'#00e5a0':'#ff3d5a'}">${m?.winRate ?? '—'}%</td>
               <td style="color:${(m?.netPnl||0)>=0?'#00e5a0':'#ff3d5a'}">${m ? (m.netPnl>=0?'+':'')+'$'+m.netPnl.toFixed(2) : '—'}</td>
@@ -427,25 +443,27 @@ function drawEquityCurve(curve, initial) {
   ctx.scale(DPR, DPR);
   ctx.clearRect(0, 0, w, h);
 
-  const vals  = curve.map(p => p.value);
-  const min   = Math.min(...vals) * 0.995;
-  const max   = Math.max(...vals) * 1.005;
-  const range = max - min || 1;
+  const vals = curve.map(p => p.value);
+  const rawMin = Math.min(...vals);
+  const rawMax = Math.max(...vals);
+
+  const range = rawMax - rawMin;
+  const min = range === 0 ? rawMin - 1 : rawMin * (1 - EQUITY_PADDING_FACTOR);
+  const max = range === 0 ? rawMax + 1 : rawMax * (1 + EQUITY_PADDING_FACTOR);
+  const span = max - min;
 
   const padL = 6, padR = 40, padT = 8, padB = 6;
   const cW = w - padL - padR, cH = h - padT - padB;
   const n  = curve.length;
 
-  const tx = i => padL + (i / (n-1)) * cW;
-  const ty = v => padT + cH - ((v - min) / range) * cH;
+  const tx = i => padL + (i / (n - 1)) * cW;
+  const ty = v => padT + cH - ((v - min) / span) * cH;
 
-  // Baseline
   const baseY = ty(initial);
   ctx.strokeStyle = 'rgba(255,255,255,0.06)';
   ctx.lineWidth = 0.5;
   ctx.beginPath(); ctx.moveTo(padL, baseY); ctx.lineTo(padL + cW, baseY); ctx.stroke();
 
-  // Fill area under curve
   const gradient = ctx.createLinearGradient(0, padT, 0, padT + cH);
   gradient.addColorStop(0, 'rgba(0,229,160,0.2)');
   gradient.addColorStop(1, 'rgba(0,229,160,0)');
@@ -453,31 +471,29 @@ function drawEquityCurve(curve, initial) {
   ctx.beginPath();
   curve.forEach((p, i) => {
     const x = tx(i), y = ty(p.value);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    if (i === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
   });
-  ctx.lineTo(tx(n-1), padT + cH);
+  ctx.lineTo(tx(n - 1), padT + cH);
   ctx.lineTo(tx(0), padT + cH);
   ctx.closePath();
   ctx.fillStyle = gradient;
   ctx.fill();
 
-  // Line
   ctx.beginPath();
   curve.forEach((p, i) => {
     const x = tx(i), y = ty(p.value);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    if (i === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
   });
   ctx.strokeStyle = '#00e5a0';
   ctx.lineWidth = 1.5;
   ctx.lineJoin  = 'round';
   ctx.stroke();
 
-  // Labels
   ctx.fillStyle = 'rgba(255,255,255,0.4)';
   ctx.font = '9px JetBrains Mono, monospace';
   ctx.textAlign = 'left';
-  ctx.fillText('$' + vals[vals.length-1].toFixed(0), padL + cW + 3, ty(vals[vals.length-1]) + 3);
-  ctx.fillText('$' + min.toFixed(0), padL + cW + 3, padT + cH);
+  ctx.fillText('$' + vals[vals.length - 1].toFixed(0), padL + cW + 3, ty(vals[vals.length - 1]) + 3);
+  ctx.fillText('$' + rawMin.toFixed(0), padL + cW + 3, padT + cH);
 }
 
 function drawDrawdownCurve(curve) {
@@ -496,14 +512,14 @@ function drawDrawdownCurve(curve) {
   ctx.scale(DPR, DPR);
   ctx.clearRect(0, 0, w, h);
 
-  const vals  = curve.map(p => p.drawdownPct);
-  const max   = Math.max(...vals, 1);
+  const vals = curve.map(p => p.drawdownPct);
+  const max  = Math.max(...vals, 1);
 
   const padL = 6, padR = 40, padT = 8, padB = 6;
   const cW = w - padL - padR, cH = h - padT - padB;
   const n  = curve.length;
 
-  const tx = i => padL + (i / (n-1)) * cW;
+  const tx = i => padL + (i / (n - 1)) * cW;
   const ty = v => padT + (v / max) * cH;
 
   const grad = ctx.createLinearGradient(0, padT, 0, padT + cH);
@@ -511,12 +527,11 @@ function drawDrawdownCurve(curve) {
   grad.addColorStop(1, 'rgba(255,61,90,0)');
 
   ctx.beginPath();
+  ctx.moveTo(tx(0), padT); // start at top-left of chart area (zero drawdown baseline)
   curve.forEach((p, i) => {
-    const x = tx(i), y = ty(p.drawdownPct);
-    i === 0 ? ctx.moveTo(x, padT) : null;
-    ctx.lineTo(x, y);
+    ctx.lineTo(tx(i), ty(p.drawdownPct));
   });
-  ctx.lineTo(tx(n-1), padT);
+  ctx.lineTo(tx(n - 1), padT); // return to top-right baseline
   ctx.closePath();
   ctx.fillStyle = grad;
   ctx.fill();
@@ -524,7 +539,7 @@ function drawDrawdownCurve(curve) {
   ctx.beginPath();
   curve.forEach((p, i) => {
     const x = tx(i), y = ty(p.drawdownPct);
-    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    if (i === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
   });
   ctx.strokeStyle = '#ff3d5a';
   ctx.lineWidth = 1.5;
@@ -552,11 +567,15 @@ export function btExport() {
       t.barDuration, t.mae?.toFixed(4), t.mfe?.toFixed(4),
     ].join(','));
   });
-  const a = Object.assign(document.createElement('a'), {
-    href:     URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' })),
+
+  const url = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+  const a   = Object.assign(document.createElement('a'), {
+    href:     url,
     download: `backtest_${Date.now()}.csv`,
   });
   a.click();
+  URL.revokeObjectURL(url);
+
   showToast('Exported ' + _result.trades.length + ' trades');
 }
 
@@ -639,7 +658,6 @@ const BT_CSS = `
 }
 `;
 
-// Inject styles once
 if (!document.getElementById('bt-styles')) {
   const style = document.createElement('style');
   style.id = 'bt-styles';
