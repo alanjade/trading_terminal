@@ -74,7 +74,7 @@ Object.assign(window, {
   anchorToSessionOpen, clearAnchor, replayLoad, replayToggle, replayStep, replayReset,
   openJournalEntry,
   btRun, btCompare, btExport,
-  runMTFScan, mtfAddCoin, mtfClearCoins, mtfLoadFromScreener, mtfLoadWatchlist,
+  runMTFScan, mtfAddCoin, mtfClearCoins, mtfLoadFromScreener, mtfLoadWatchlist, mtfScanCurrent,
   toggleMTFTf, mtfSetFilter,
   computeAndRender,
   renderScreenerTable,
@@ -1477,6 +1477,28 @@ function mtfLoadWatchlist() {
   mtfCoins = [...new Set([...mtfCoins, ...state.watchlist])];
   _mtfUpdateCoinCount();
   showToast(`✓ Loaded ${state.watchlist.length} watchlist coins`);
+}
+
+function mtfScanCurrent() {
+  const sym = state.sym;
+  if (!sym) { showToast('No symbol loaded'); return; }
+ 
+  // Add to front of list if not already present
+  if (!mtfCoins.includes(sym)) {
+    mtfCoins.unshift(sym);
+    _mtfUpdateCoinCount();
+  }
+ 
+  // Expand + scroll to the card
+  const card = document.getElementById('card-mtf');
+  if (card?.classList.contains('collapsed')) {
+    card.classList.remove('collapsed');
+    saveCollapsed('card-mtf', false);
+  }
+  card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+ 
+  showToast(`Scanning ${fmtSym(sym)} across ${mtfTFs.join(', ')}…`);
+  runMTFScan();
 }
 
 function toggleMTFTf(tf, btn) {

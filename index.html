@@ -691,8 +691,10 @@
     <div class="card-header" onclick="toggleCard('card-mtf')">
       <span class="card-title">🔀 MTF Confluence</span>
       <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn--icon" id="mtf-current-btn" onclick="event.stopPropagation();mtfScanCurrent()" title="Scan current chart symbol" style="font-size:9px">⊕ Current</button>
         <button class="btn btn--primary btn--icon" id="mtf-scan-btn" onclick="event.stopPropagation();runMTFScan()">▶ Scan</button>
         <span class="card-chevron" aria-hidden="true">▾</span>
+      </div>
       </div>
     </div>
     <div class="card-body">
@@ -704,6 +706,8 @@
                style="width:110px;font-size:10px"
                onkeydown="if(event.key==='Enter')mtfAddCoin()" />
         <button class="btn btn--icon" style="font-size:9px" onclick="mtfAddCoin()" aria-label="Add coin">+</button>
+        <button class="btn btn--icon btn--primary" style="font-size:9px" onclick="mtfScanCurrent()"
+        title="Add current chart symbol and scan">⊕ Current</button>
         <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadFromScreener()"
                 title="Load top scored coins from last screener scan">⬇ From Screener</button>
         <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadWatchlist()"
