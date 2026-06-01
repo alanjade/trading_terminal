@@ -1,33 +1,11 @@
 /**
  * engine/signals.js
  * Entry quality scoring, suggestion computation, and confluence engine.
- * Extracted from the monolith and enhanced with regime + structure context.
  */
 
 import { getFibLevels, nearestFib, calcATR } from '../indicators/engine.js';
 import { TF_MS } from '../utils/helpers.js';
 
-// ── Entry Quality Scorer ──────────────────────────────────────────────────────
-
-/**
- * Scores a potential entry 0–100 based on multiple confluence factors.
- *
- * @param {object} params
- * @param {string}  params.dir          - 'long' | 'short'
- * @param {number}  params.rsi
- * @param {number}  params.e9
- * @param {number}  params.e20
- * @param {number}  params.e50
- * @param {number}  params.price        - current live price
- * @param {number}  params.vwap         - rolling session VWAP
- * @param {number|null} params.avwap    - anchored VWAP (null when no anchor set)
- * @param {number}  params.cvd
- * @param {Array}   params.crossovers
- * @param {string}  params.tf
- * @param {Array}   params.candles
- * @param {object}  params.regime
- * @returns {{ score: number, label: string, cls: string, factors: string[] }}
- */
 export function scoreEntryQuality({
   dir, rsi, e9, e20, e50, price, vwap, avwap,
   cvd, crossovers, tf, candles, regime
@@ -35,7 +13,7 @@ export function scoreEntryQuality({
   let score = 0;
   const factors = [];
 
-  // 1. EMA Stack alignment (max 30)
+  // EMA Stack alignment (max 30)
   if (dir === 'long') {
     if (e9 > e20 && e20 > e50) { score += 30; factors.push('Full bullish stack'); }
     else if (e9 > e50)          { score += 15; factors.push('Price above EMA50'); }
@@ -44,7 +22,7 @@ export function scoreEntryQuality({
     else if (e9 < e50)          { score += 15; factors.push('Price below EMA50'); }
   }
 
-  // 2. RSI conditions (max 20)
+  //  RSI conditions (max 20)
   if (dir === 'long') {
     if (rsi > 50 && rsi < 65)       { score += 20; factors.push('RSI momentum zone'); }
     else if (rsi >= 40 && rsi <= 50){ score += 12; factors.push('RSI midzone'); }
@@ -57,11 +35,11 @@ export function scoreEntryQuality({
     else if (rsi <= 35)              { score -= 10; factors.push('RSI oversold'); }
   }
 
-  // 3. Price vs EMAs (max 15)
+  // Price vs EMAs (max 15)
   if (dir === 'long'  && price > e20) { score += 15; factors.push('Price > EMA20'); }
   if (dir === 'short' && price < e20) { score += 15; factors.push('Price < EMA20'); }
 
-  // 4. VWAP alignment (max 15)
+  // VWAP alignment (max 15)
   if (vwap) {
     if (dir === 'long'  && price > vwap) { score += 15; factors.push('Price above VWAP'); }
     if (dir === 'short' && price < vwap) { score += 15; factors.push('Price below VWAP'); }
@@ -69,44 +47,38 @@ export function scoreEntryQuality({
     if (dir === 'short' && price > vwap) { score -=  8; factors.push('Above VWAP — weak short'); }
   }
 
+  //  Anchored VWAP alignment (max 15)
   if (avwap != null) {
     const distPct = Math.abs(price - avwap) / avwap * 100;
 
-   if (dir === 'long') {
-    if (price > avwap) {
-      score += 10;
-      factors.push('Price above session AVWAP');
-      // Bonus only fires when price is already confirmed above AVWAP
-      if (distPct < 0.3) {
-        score += 5;
-        factors.push('At AVWAP — institutional mean reversion zone');
+    if (dir === 'long') {
+      if (price > avwap) {
+        score += 10;
+        factors.push('Price above session AVWAP');
+        if (distPct < 0.3) {
+          score += 5;
+          factors.push('At AVWAP — institutional mean reversion zone');
+        }
+      } else {
+        score -= 5;
+        factors.push('Below AVWAP — anchored resistance');
       }
     } else {
-      score -= 5;
-      factors.push('Below AVWAP — anchored resistance');
-      // No bonus possible here — price is below the level
-    }
-  } else {
-    if (price < avwap) {
-      score += 10;
-      factors.push('Price below session AVWAP');
-      if (distPct < 0.3) {
-        score += 5;
-        factors.push('At AVWAP — institutional rejection zone');
-      }
-    } else {
-      score -= 5;
-      factors.push('Above AVWAP — anchored support');
-    }
-      // Bonus: price rejecting at AVWAP from below
-      if (distPct < 0.3 && price <= avwap) {
-        score += 5;
-        factors.push('At AVWAP — institutional rejection zone');
+      if (price < avwap) {
+        score += 10;
+        factors.push('Price below session AVWAP');
+        if (distPct < 0.3) {
+          score += 5;
+          factors.push('At AVWAP — institutional rejection zone');
+        }
+      } else {
+        score -= 5;
+        factors.push('Above AVWAP — anchored support');
       }
     }
   }
 
-  // 5. CVD alignment (max 15)
+  // CVD alignment (max 15)
   if (cvd !== undefined && cvd !== null) {
     if (dir === 'long'  && cvd > 0) { score += 15; factors.push('CVD net buying'); }
     if (dir === 'short' && cvd < 0) { score += 15; factors.push('CVD net selling'); }
@@ -114,7 +86,7 @@ export function scoreEntryQuality({
     if (dir === 'short' && cvd > 0) { score -=  5; factors.push('CVD bullish divergence'); }
   }
 
-  // 6. Recent crossover bonus (max 20)
+  // Recent crossover bonus (max 20)
   if (crossovers && crossovers.length > 0) {
     const recent = crossovers[crossovers.length - 1];
     const age    = (Date.now() - recent.time) / 60_000;
@@ -123,7 +95,7 @@ export function scoreEntryQuality({
     if (recent.type === 'bear' && dir === 'short' && age < cutoff) { score += 20; factors.push('Fresh bear cross'); }
   }
 
-  // 7. Fibonacci proximity (max 20)
+  // Fibonacci proximity (max 20)
   if (candles && candles.length >= 5) {
     const fibLevels = getFibLevels(candles.slice(-50));
     const nf        = nearestFib(price, fibLevels);
@@ -143,7 +115,7 @@ export function scoreEntryQuality({
     }
   }
 
-  // 8. Regime bonus/penalty (max 15, min -15)
+  // 9. Regime bonus/penalty (max 15, min -15)
   if (regime) {
     if (regime.type === 'trending') {
       if ((regime.dir === 'bull' && dir === 'long') || (regime.dir === 'bear' && dir === 'short')) {
@@ -169,15 +141,6 @@ export function scoreEntryQuality({
   return { score, label, cls, factors };
 }
 
-// ── Suggestion Engine ─────────────────────────────────────────────────────────
-
-/**
- * Computes framework entry suggestion from current indicators.
- *
- * @param {object} params
- * @param {number|null} params.avwap - anchored VWAP value (null when not set)
- * @returns {{ dir, entry, stop, target, reason }}
- */
 export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, candles, vwap, avwap, regime }) {
   if (!e9 || !e20 || !e50 || candles.length < 50 || !livePrice) return null;
 
@@ -185,21 +148,17 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
   const bearish   = e9 < e20 && e20 < e50;
   const aboveVwap = vwap ? livePrice > vwap : null;
 
-  // ATR-based stop cushion
   const atr = calcATR(candles, 14) || livePrice * 0.005;
 
-  // Time-based lookback (~24h worth of candles, floored at 5)
   const candleMs    = TF_MS[tf] || 300_000;
   const lookback24h = Math.max(5, Math.min(candles.length, Math.round(86_400_000 / candleMs)));
   const recent      = candles.slice(-lookback24h);
 
-  // Local 5-candle structure
   const localN      = Math.min(5, candles.length);
   const localCandles= candles.slice(-localN);
   const localLow    = Math.min(...localCandles.map(c => c.l));
   const localHigh   = Math.max(...localCandles.map(c => c.h));
 
-  // Fib note
   const fibLevels = getFibLevels(candles.slice(-50));
   const nfib = nearestFib(livePrice, fibLevels);
   let fibNote = '';
@@ -207,21 +166,17 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
     fibNote = ` Price at ${nfib.label} Fib retracement (${nfib.price.toFixed(4)}) — key pullback zone.`;
   }
 
-  // VWAP note
   const vwapNote = (aboveVwap !== null)
     ? (aboveVwap ? ' Price above VWAP — confirms bias.' : ' ⚠ Price below VWAP — weaker setup.')
     : '';
 
-  // AVWAP note — only present when an anchor is active
   let avwapNote = '';
   if (avwap != null) {
     const aboveAvwap = livePrice > avwap;
     const avwapFmt   = avwap.toFixed(avwap >= 1000 ? 2 : avwap >= 1 ? 4 : 6);
-    if (aboveAvwap) {
-      avwapNote = ` Price above session AVWAP (${avwapFmt}) — anchored mean supports longs.`;
-    } else {
-      avwapNote = ` ⚠ Price below session AVWAP (${avwapFmt}) — selling pressure from anchored mean.`;
-    }
+    avwapNote = aboveAvwap
+      ? ` Price above session AVWAP (${avwapFmt}) — anchored mean supports longs.`
+      : ` ⚠ Price below session AVWAP (${avwapFmt}) — selling pressure from anchored mean.`;
   }
 
   let dir, entry, stop, target, reason;
@@ -229,26 +184,18 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
   if (bullish && rsi < 65) {
     dir   = 'long';
     entry = livePrice;
-
-    // When price is above AVWAP on a confirmed long, use AVWAP as an additional
-    // stop candidate — it often acts as the most meaningful dynamic support.
     const stopCandidates = [e20, localLow];
     if (avwap != null && livePrice > avwap) stopCandidates.push(avwap);
     stop   = Math.min(...stopCandidates) * 0.9995;
-
     target = entry + (entry - stop) * rrRatio;
     reason = `Bullish EMA stack (9>${e9.toFixed(4)} > 20>${e20.toFixed(4)} > 50>${e50.toFixed(4)}). RSI ${Math.round(rsi)} — momentum intact.${vwapNote}${avwapNote}${fibNote} SL below EMA20 / 5-candle low${avwap != null && livePrice > avwap ? ' / AVWAP' : ''}.`;
 
   } else if (bearish && rsi > 35) {
     dir   = 'short';
     entry = livePrice;
-
-    // Mirror: when price is below AVWAP on a short, AVWAP becomes an additional
-    // resistance reference for stop placement.
     const stopCandidates = [e20, localHigh];
     if (avwap != null && livePrice < avwap) stopCandidates.push(avwap);
     stop   = Math.max(...stopCandidates) * 1.0005;
-
     target = entry - (stop - entry) * rrRatio;
     reason = `Bearish EMA stack (9<${e9.toFixed(4)} < 20<${e20.toFixed(4)} < 50<${e50.toFixed(4)}). RSI ${Math.round(rsi)} — downside pressure.${vwapNote}${avwapNote}${fibNote} SL above EMA20 / 5-candle high${avwap != null && livePrice < avwap ? ' / AVWAP' : ''}.`;
 
@@ -277,12 +224,6 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
   return { dir, entry, stop, target, reason };
 }
 
-// ── Entry Zones ───────────────────────────────────────────────────────────────
-
-/**
- * Computes the three smart entry zones (aggressive/balanced/conservative)
- * based on EMAs and ATR spacing.
- */
 export function computeEntryZones({ e9, e20, livePrice, suggestion, atr }) {
   if (!e9 || !e20 || !livePrice) return null;
 
@@ -313,13 +254,6 @@ export function computeEntryZones({ e9, e20, livePrice, suggestion, atr }) {
   return { aggressive: z1, balanced: z2, conservative: z3, dir, stop };
 }
 
-// ── ATR Position Sizing ───────────────────────────────────────────────────────
-
-/**
- * Calculates ATR-based position size from risk parameters.
- * @param {object} params
- * @returns {PositionSize}
- */
 export function calcAtrPositionSize({ capital, riskPct, entry, atr, atrMultiple = 2 }) {
   if (!capital || !riskPct || !entry || !atr) return null;
 
@@ -332,11 +266,6 @@ export function calcAtrPositionSize({ capital, riskPct, entry, atr, atrMultiple 
   return { riskUSD, stopDistPct, stopDistAbs, tokens, positionValue, atrMultiple };
 }
 
-// ── Partial TPs ───────────────────────────────────────────────────────────────
-
-/**
- * Computes TP1 (1R), TP2 (2R), TP3 (3R) prices and percentages.
- */
 export function computePartialTPs({ entry, stop, dir }) {
   if (!entry || !stop || entry === stop) return null;
   const risk   = Math.abs(entry - stop);

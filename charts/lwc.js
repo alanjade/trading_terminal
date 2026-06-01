@@ -1,93 +1,52 @@
 /**
- * Features:
- *   - Candlestick + EMA overlays + VWAP + Anchored VWAP
- *   - RSI pane, Volume pane, CVD pane (synchronized)
- *   - Drawing tools: trendline, horizontal ray, fib retracement, rectangle, note
- *   - Keyboard shortcuts + toolbar
- *   - Theme-aware (dark / light)
- *   - Suggestion levels (Entry / SL / TP)
- *   - Structure event labels (BOS / CHoCH)
- *   - Session / PDH / PDL levels
- *   - Volume Profile overlay (custom primitive)
+ * charts/lwc.js
+ * LightweightCharts-based chart manager.
  */
 
 const LW = () => window.LightweightCharts;
 
-// ── Colour Palette ────────────────────────────────────────────────────────────
-
 const DARK = {
-  bg:       '#0b0e17',
-  bg2:      '#111520',
-  grid:     'rgba(255,255,255,0.04)',
-  text:     'rgba(255,255,255,0.5)',
-  border:   'rgba(255,255,255,0.08)',
-  green:    '#00e5a0',
-  red:      '#ff3d5a',
-  amber:    '#ffb82e',
-  blue:     '#4da6ff',
-  purple:   '#a78bff',
-  ema9:     '#ff6b35',
-  ema20:    '#4da6ff',
-  ema50:    '#a78bff',
-  vwap:     'rgba(240,224,64,0.85)',
-  avwap:    'rgba(167,139,255,0.85)',
+  bg: '#0b0e17', bg2: '#111520',
+  grid: 'rgba(255,255,255,0.04)', text: 'rgba(255,255,255,0.5)',
+  border: 'rgba(255,255,255,0.08)',
+  green: '#00e5a0', red: '#ff3d5a', amber: '#ffb82e',
+  blue: '#4da6ff', purple: '#a78bff',
+  ema9: '#ff6b35', ema20: '#4da6ff', ema50: '#a78bff',
+  vwap: 'rgba(240,224,64,0.85)', avwap: 'rgba(167,139,255,0.85)',
 };
 
 const LIGHT = {
-  bg:       '#f0f2f8',
-  bg2:      '#ffffff',
-  grid:     'rgba(0,0,0,0.05)',
-  text:     'rgba(0,0,0,0.45)',
-  border:   'rgba(0,0,0,0.10)',
-  green:    '#00a870',
-  red:      '#e0253a',
-  amber:    '#d4930a',
-  blue:     '#2070c8',
-  purple:   '#7050d0',
-  ema9:     '#d44010',
-  ema20:    '#2070c8',
-  ema50:    '#7050d0',
-  vwap:     'rgba(140,110,0,0.85)',
-  avwap:    'rgba(100,70,200,0.85)',
+  bg: '#f0f2f8', bg2: '#ffffff',
+  grid: 'rgba(0,0,0,0.05)', text: 'rgba(0,0,0,0.45)',
+  border: 'rgba(0,0,0,0.10)',
+  green: '#00a870', red: '#e0253a', amber: '#d4930a',
+  blue: '#2070c8', purple: '#7050d0',
+  ema9: '#d44010', ema20: '#2070c8', ema50: '#7050d0',
+  vwap: 'rgba(140,110,0,0.85)', avwap: 'rgba(100,70,200,0.85)',
 };
-
-// ── Drawing Tool Types ────────────────────────────────────────────────────────
 
 export const TOOL = {
-  NONE:       'none',
-  TRENDLINE:  'trendline',
-  HRAY:       'hray',
-  FIB:        'fib',
-  RECT:       'rect',
-  NOTE:       'note',
+  NONE: 'none', TRENDLINE: 'trendline',
+  HRAY: 'hray', FIB: 'fib', RECT: 'rect', NOTE: 'note',
 };
-
-// ── LWCChart Class ────────────────────────────────────────────────────────────
 
 export class LWCChart {
   constructor(containerId, options = {}) {
     this.containerId  = containerId;
     this.theme        = options.theme || 'dark';
     this.onCrosshair  = options.onCrosshair || null;
-
-    // Internal state
-    this._charts      = {};   // { price, rsi, vol, cvd }
+    this._charts      = {};
     this._series      = {};
     this._drawings    = [];
     this._activeTool  = TOOL.NONE;
     this._drawingStart= null;
     this._tempLine    = null;
-    this._pricelines  = {};   // keyed suggestion/session lines
+    this._pricelines  = {};
     this._markers     = [];
-
     this._init();
   }
 
-  // ── Colour helpers ──────────────────────────────────────────────────────────
-
   get C() { return this.theme === 'dark' ? DARK : LIGHT; }
-
-  // ── Initialisation ──────────────────────────────────────────────────────────
 
   _init() {
     const container = document.getElementById(this.containerId);
@@ -95,31 +54,24 @@ export class LWCChart {
       console.warn('[LWCChart] container or LightweightCharts not found');
       return;
     }
-
     container.innerHTML = '';
     container.style.position = 'relative';
 
-    // Build pane wrappers
     this._priceEl = this._pane(container, 'lwc-price', 320);
     this._rsiEl   = this._pane(container, 'lwc-rsi',   70);
     this._volEl   = this._pane(container, 'lwc-vol',   44);
     this._cvdEl   = this._pane(container, 'lwc-cvd',   60);
 
-    // Create charts
     this._charts.price = this._createChart(this._priceEl, 320, true);
     this._charts.rsi   = this._createChart(this._rsiEl,   70,  false);
     this._charts.vol   = this._createChart(this._volEl,   44,  false);
     this._charts.cvd   = this._createChart(this._cvdEl,   60,  false);
 
-    // Price chart series
     const C = this.C;
     this._series.candles = this._charts.price.addCandlestickSeries({
-      upColor:          C.green,
-      downColor:        C.red,
-      borderUpColor:    C.green,
-      borderDownColor:  C.red,
-      wickUpColor:      C.green,
-      wickDownColor:    C.red,
+      upColor: C.green, downColor: C.red,
+      borderUpColor: C.green, borderDownColor: C.red,
+      wickUpColor: C.green, wickDownColor: C.red,
     });
 
     this._series.ema9  = this._addLine(this._charts.price, C.ema9,   1.5);
@@ -128,35 +80,23 @@ export class LWCChart {
     this._series.vwap  = this._addLine(this._charts.price, C.vwap,   1.5);
     this._series.avwap = this._addLine(this._charts.price, C.avwap,  1.5, [4, 3]);
 
-    // RSI series
     this._series.rsi = this._charts.rsi.addLineSeries({
       color: C.purple, lineWidth: 1.5, priceScaleId: 'right',
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
     });
     this._addRSIBands();
 
-    // Volume histogram
     this._series.vol = this._charts.vol.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'right',
+      priceFormat: { type: 'volume' }, priceScaleId: 'right',
     });
 
-    // CVD histogram
-    this._series.cvd = this._charts.cvd.addHistogramSeries({
-      priceScaleId: 'right',
-    });
+    this._series.cvd = this._charts.cvd.addHistogramSeries({ priceScaleId: 'right' });
     this._series.cvdEma = this._addLine(this._charts.cvd, C.amber, 1.2);
 
-    // Sync crosshairs
     this._syncCrosshairs();
-
-    // Drawing toolbar
     this._buildToolbar(container);
-
-    // Mouse events for drawing
     this._bindDrawingEvents();
 
-    // Resize observer
     this._ro = new ResizeObserver(() => this._resize());
     this._ro.observe(container);
   }
@@ -175,14 +115,14 @@ export class LWCChart {
       width:  el.parentElement?.clientWidth || 800,
       height,
       layout: {
-        background:  { type: 'solid', color: C.bg },
-        textColor:   C.text,
-        fontFamily:  'JetBrains Mono, monospace',
-        fontSize:    10,
+        background: { type: 'solid', color: C.bg },
+        textColor: C.text,
+        fontFamily: 'JetBrains Mono, monospace',
+        fontSize: 10,
       },
       grid: {
-        vertLines:   { color: C.grid, style: 1 },
-        horzLines:   { color: C.grid, style: 1 },
+        vertLines: { color: C.grid, style: 1 },
+        horzLines: { color: C.grid, style: 1 },
       },
       crosshair: {
         mode: LW().CrosshairMode.Normal,
@@ -190,22 +130,21 @@ export class LWCChart {
         horzLine: { color: 'rgba(255,255,255,0.15)', labelBackgroundColor: C.bg2 },
       },
       rightPriceScale: {
-        borderColor: C.border,
-        textColor:   C.text,
+        borderColor: C.border, textColor: C.text,
         scaleMargins: { top: 0.08, bottom: 0.05 },
       },
       timeScale: {
-        visible:          hasTimeScale,
-        borderColor:      C.border,
-        timeVisible:      true,
-        secondsVisible:   false,
+        visible: hasTimeScale,
+        borderColor: C.border,
+        timeVisible: true,
+        secondsVisible: false,
         tickMarkFormatter: t => {
           const d = new Date(t * 1000);
           return `${d.getUTCHours().toString().padStart(2,'0')}:${d.getUTCMinutes().toString().padStart(2,'0')}`;
         },
       },
-      handleScroll:  { mouseWheel: true, pressedMouseMove: true },
-      handleScale:   { mouseWheel: true, pinch: true },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true },
+      handleScale:  { mouseWheel: true, pinch: true },
     });
   }
 
@@ -219,12 +158,12 @@ export class LWCChart {
     const C = this.C;
     [70, 50, 30].forEach(v => {
       const s = this._charts.rsi.addLineSeries({
-        color:             v === 50 ? 'rgba(255,255,255,0.12)' : v === 70 ? 'rgba(255,61,90,0.3)' : 'rgba(0,229,160,0.3)',
-        lineWidth:         1,
-        lineStyle:         2, // dashed
-        priceScaleId:      'right',
-        lastValueVisible:  false,
-        priceLineVisible:  false,
+        color: v === 50 ? 'rgba(255,255,255,0.12)' : v === 70 ? 'rgba(255,61,90,0.3)' : 'rgba(0,229,160,0.3)',
+        lineWidth: 1,
+        lineStyle: 2,
+        priceScaleId: 'right',
+        lastValueVisible: false,
+        priceLineVisible: false,
         crosshairMarkerVisible: false,
       });
       s._rsiBand = v;
@@ -233,49 +172,34 @@ export class LWCChart {
     });
   }
 
-  // ── Data Loading ────────────────────────────────────────────────────────────
-
-  /**
-   * Main data setter. Call when symbol/TF changes.
-   * @param {Candle[]} candles
-   * @param {object}   indicators  { e9s, e20s, e50s, vwapVals, avwapVals, rsiVals, cvdVals, cvdEmaVals }
-   */
   setData(candles, indicators = {}) {
     if (!candles?.length) return;
-
     const toTime = c => Math.floor(c.t / 1000);
 
-    // Candles
     this._series.candles.setData(candles.map(c => ({
       time: toTime(c), open: c.o, high: c.h, low: c.l, close: c.c,
     })));
 
-    // EMAs
     this._setLineData(this._series.ema9,  candles, indicators.e9s);
     this._setLineData(this._series.ema20, candles, indicators.e20s);
     this._setLineData(this._series.ema50, candles, indicators.e50s);
     this._setLineData(this._series.vwap,  candles, indicators.vwapVals);
     this._setLineData(this._series.avwap, candles, indicators.avwapVals);
+    this._setLineData(this._series.rsi,   candles, indicators.rsiVals);
 
-    // RSI
-    this._setLineData(this._series.rsi, candles, indicators.rsiVals);
     if (this._series.rsiBands) {
       this._series.rsiBands.forEach(s => {
         s.setData(candles.map(c => ({ time: toTime(c), value: s._rsiBand })));
       });
     }
 
-    // Volume
     const C = this.C;
     this._series.vol.setData(candles.map(c => ({
       time: toTime(c), value: c.v,
       color: c.c >= c.o ? C.green + '80' : C.red + '80',
     })));
 
-    // CVD
     this._setCVDData(candles, indicators.cvdVals, indicators.cvdEmaVals);
-
-    // Fit
     this._charts.price.timeScale().fitContent();
   }
 
@@ -307,23 +231,18 @@ export class LWCChart {
     }
   }
 
-  /**
-   * Update the live (forming) candle without full redraw.
-   */
   updateLiveCandle(candle) {
     if (!candle) return;
     const t = Math.floor(candle.t / 1000);
     this._series.candles.update({ time: t, open: candle.o, high: candle.h, low: candle.l, close: candle.c });
-    if (candle._liveVwap)   this._series.vwap.update({ time: t, value: candle._liveVwap });
-    if (candle._liveAvwap)  this._series.avwap.update({ time: t, value: candle._liveAvwap });
-    if (candle._liveRsi != null) this._series.rsi.update({ time: t, value: candle._liveRsi });
+    if (candle._liveVwap)           this._series.vwap.update({ time: t, value: candle._liveVwap });
+    if (candle._liveAvwap != null)  this._series.avwap.update({ time: t, value: candle._liveAvwap });
+    if (candle._liveRsi != null)    this._series.rsi.update({ time: t, value: candle._liveRsi });
     const C = this.C;
     if (candle._liveCvd != null) {
       this._series.cvd.update({ time: t, value: candle._liveCvd, color: candle._liveCvd >= 0 ? C.green + '88' : C.red + '88' });
     }
   }
-
-  // ── Suggestion Levels ───────────────────────────────────────────────────────
 
   setSuggestion(sug) {
     if (!sug?.entry) return;
@@ -347,7 +266,6 @@ export class LWCChart {
     add('stop',   sug.stop,   C.red,   'SL',   true);
     add('target', sug.target, C.green, 'TP',   true);
 
-    // Partial TPs
     if (sug.entry && sug.stop) {
       const risk = Math.abs(sug.entry - sug.stop);
       [1,2,3].forEach(n => {
@@ -361,16 +279,12 @@ export class LWCChart {
     this._removePriceLines(['entry','stop','target','tp1','tp2','tp3']);
   }
 
-  // ── Session Levels ──────────────────────────────────────────────────────────
-
   setSessionLevels(levels) {
-    this._removePriceLines(['pdh','pdl','tdh','tdl']);
+    this._removePriceLines(['pdh','pdl']);
     const C = this.C;
     if (levels?.prevHigh) this._pricelines.pdh = this._series.candles.createPriceLine({ price: levels.prevHigh, color: C.amber + 'aa', title: 'PDH', lineWidth: 1, lineStyle: LW().LineStyle.Dashed, axisLabelVisible: true });
     if (levels?.prevLow)  this._pricelines.pdl = this._series.candles.createPriceLine({ price: levels.prevLow,  color: C.amber + '77', title: 'PDL', lineWidth: 1, lineStyle: LW().LineStyle.Dashed, axisLabelVisible: true });
   }
-
-  // ── Structure Markers ───────────────────────────────────────────────────────
 
   setStructureEvents(candles, events) {
     if (!events?.length || !candles?.length) return;
@@ -388,21 +302,16 @@ export class LWCChart {
         size:     1,
       };
     }).filter(Boolean);
-
     this._series.candles.setMarkers(markers);
     this._markers = markers;
   }
-
-  // ── Theme Toggle ────────────────────────────────────────────────────────────
 
   setTheme(theme) {
     this.theme = theme;
     const C = this.C;
     const layout = { background: { type: 'solid', color: C.bg }, textColor: C.text };
     const grid   = { vertLines: { color: C.grid }, horzLines: { color: C.grid } };
-
     Object.values(this._charts).forEach(ch => ch.applyOptions({ layout, grid }));
-
     this._series.candles.applyOptions({ upColor: C.green, downColor: C.red, borderUpColor: C.green, borderDownColor: C.red, wickUpColor: C.green, wickDownColor: C.red });
     this._series.ema9.applyOptions({ color: C.ema9 });
     this._series.ema20.applyOptions({ color: C.ema20 });
@@ -413,16 +322,11 @@ export class LWCChart {
     this._series.cvdEma.applyOptions({ color: C.amber });
   }
 
-  // ── Drawing Tools ───────────────────────────────────────────────────────────
-
   setTool(tool) {
     this._activeTool = tool;
     this._drawingStart = null;
     const container = document.getElementById(this.containerId);
-    if (container) {
-      container.style.cursor = tool === TOOL.NONE ? 'default' : 'crosshair';
-    }
-    // Update toolbar buttons
+    if (container) container.style.cursor = tool === TOOL.NONE ? 'default' : 'crosshair';
     document.querySelectorAll('.lwc-tool-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tool === tool);
     });
@@ -454,46 +358,33 @@ export class LWCChart {
       btn.dataset.tool = tool;
       btn.title = title;
       btn.textContent = label;
-      btn.style.cssText = `
-        background:transparent; border:1px solid transparent;
-        border-radius:4px; color:rgba(255,255,255,0.5); cursor:pointer;
-        padding:3px 7px; font-family:inherit; font-size:11px;
-        transition:all 0.15s;
-      `;
+      btn.style.cssText = `background:transparent; border:1px solid transparent; border-radius:4px; color:rgba(255,255,255,0.5); cursor:pointer; padding:3px 7px; font-family:inherit; font-size:11px; transition:all 0.15s;`;
       btn.addEventListener('mouseenter', () => { if (!btn.classList.contains('active')) btn.style.color = '#fff'; });
       btn.addEventListener('mouseleave', () => { if (!btn.classList.contains('active')) btn.style.color = 'rgba(255,255,255,0.5)'; });
       btn.addEventListener('click', () => this.setTool(tool));
       bar.appendChild(btn);
     });
 
-    // Separator
     const sep = document.createElement('div');
     sep.style.cssText = 'width:1px;height:16px;background:rgba(255,255,255,0.1);margin:0 3px';
     bar.appendChild(sep);
 
-    // Clear drawings button
     const clearBtn = document.createElement('button');
     clearBtn.title = 'Clear all drawings';
     clearBtn.textContent = '🗑';
-    clearBtn.style.cssText = `
-      background:transparent; border:1px solid transparent;
-      border-radius:4px; color:rgba(255,61,90,0.6); cursor:pointer;
-      padding:3px 7px; font-family:inherit; font-size:11px;
-    `;
+    clearBtn.style.cssText = `background:transparent; border:1px solid transparent; border-radius:4px; color:rgba(255,61,90,0.6); cursor:pointer; padding:3px 7px; font-family:inherit; font-size:11px;`;
     clearBtn.addEventListener('click', () => this.clearDrawings());
     bar.appendChild(clearBtn);
 
     container.style.position = 'relative';
     container.insertBefore(bar, container.firstChild);
 
-    // CSS for active state
     const style = document.createElement('style');
     style.textContent = `.lwc-tool-btn.active { background:rgba(0,229,160,0.15)!important; border-color:rgba(0,229,160,0.3)!important; color:#00e5a0!important; }`;
     document.head.appendChild(style);
   }
 
   _bindDrawingEvents() {
-    // Keyboard shortcuts
     document.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const k = e.key.toUpperCase();
@@ -529,19 +420,15 @@ export class LWCChart {
       this._addHRay(price);
       return;
     }
-
     if (this._activeTool === TOOL.NOTE) {
       const text = prompt('Note:');
       if (text) this._addNote(time, price, text);
       return;
     }
-
     if (!this._drawingStart) {
       this._drawingStart = { price, time, x: point.x, y: point.y };
       return;
     }
-
-    // Second click — commit drawing
     const start = this._drawingStart;
     this._drawingStart = null;
     this._clearTempDrawing();
@@ -552,10 +439,9 @@ export class LWCChart {
   }
 
   _updateTempDrawing(point) {
-    // Visual preview while drawing (lightweight — just updates a temp price line)
     const price = this._priceToValue(point.y);
     if (this._tempLine) {
-      this._series.candles.removePriceLine(this._tempLine);
+      try { this._series.candles.removePriceLine(this._tempLine); } catch(e) {}
     }
     this._tempLine = this._series.candles.createPriceLine({
       price, color: 'rgba(255,255,255,0.25)', title: '', lineWidth: 1,
@@ -570,33 +456,24 @@ export class LWCChart {
     }
   }
 
-  // ── Drawing Primitives ──────────────────────────────────────────────────────
-
   _addHRay(price) {
     const C = this.C;
     const line = this._series.candles.createPriceLine({
-      price,
-      color:    C.amber + 'cc',
-      title:    `H ${price.toFixed(2)}`,
-      lineWidth: 1,
-      lineStyle: LW().LineStyle.Dashed,
-      axisLabelVisible: true,
-      draggable: true,
+      price, color: C.amber + 'cc',
+      title: `H ${price.toFixed(2)}`,
+      lineWidth: 1, lineStyle: LW().LineStyle.Dashed,
+      axisLabelVisible: true, draggable: true,
     });
     this._drawings.push({ type: TOOL.HRAY, line });
   }
 
   _addTrendline(start, end) {
-    // Lightweight Charts doesn't have native trendlines — we approximate
-    // using a line series from start time to end time
     const C = this.C;
     const s = this._charts.price.addLineSeries({
-      color:     C.blue + 'cc',
-      lineWidth: 1,
+      color: C.blue + 'cc', lineWidth: 1,
       lineStyle: LW().LineStyle.Solid,
       priceScaleId: 'right',
-      lastValueVisible: false,
-      priceLineVisible: false,
+      lastValueVisible: false, priceLineVisible: false,
       crosshairMarkerVisible: false,
     });
     s.setData([
@@ -611,7 +488,6 @@ export class LWCChart {
     const hi = Math.max(highPrice, lowPrice);
     const lo = Math.min(highPrice, lowPrice);
     const range = hi - lo;
-
     const levels = [
       { r: 0,     color: C.text },
       { r: 0.236, color: C.amber + 'cc' },
@@ -620,7 +496,6 @@ export class LWCChart {
       { r: 0.618, color: C.purple+ 'cc' },
       { r: 1,     color: C.text },
     ];
-
     const lines = levels.map(({ r, color }) => {
       const price = hi - range * r;
       return this._series.candles.createPriceLine({
@@ -634,7 +509,6 @@ export class LWCChart {
 
   _addRect(start, end) {
     const C = this.C;
-    // Draw as two horizontal rays + two vertical markers
     [start.price, end.price].forEach(price => {
       const line = this._series.candles.createPriceLine({
         price, color: C.blue + '66', title: '',
@@ -664,8 +538,6 @@ export class LWCChart {
     this._series.candles.setMarkers(this._markers);
   }
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
   _removePriceLines(keys) {
     keys.forEach(k => {
       if (this._pricelines[k]) {
@@ -676,15 +548,12 @@ export class LWCChart {
   }
 
   _priceToValue(y) {
-    // Convert canvas y coordinate to price using chart's coordinate system
     return this._series.candles.coordinateToPrice(y) || 0;
   }
 
   _xToTime(x) {
     return this._charts.price.timeScale().coordinateToTime(x) || 0;
   }
-
-  // ── Crosshair Sync ──────────────────────────────────────────────────────────
 
   _syncCrosshairs() {
     const charts = [this._charts.price, this._charts.rsi, this._charts.vol, this._charts.cvd];
@@ -696,14 +565,16 @@ export class LWCChart {
           if (i === j) return;
           try {
             const x = other.timeScale().timeToCoordinate(param.time);
-            if (x !== null) other.setCrossHairXY(x, 0, true);
+            if (x !== null) {
+              // Use setCrosshairPosition (correct API) with a dummy price
+              other.setCrosshairPosition(NaN, param.time, other.series?.[0] || null);
+            }
           } catch(e) {}
         });
         if (this.onCrosshair) this.onCrosshair(param);
       });
     });
 
-    // Sync time scale scroll
     this._charts.price.timeScale().subscribeVisibleLogicalRangeChange(range => {
       if (!range) return;
       [this._charts.rsi, this._charts.vol, this._charts.cvd].forEach(ch => {
@@ -712,19 +583,14 @@ export class LWCChart {
     });
   }
 
-  // ── Resize ──────────────────────────────────────────────────────────────────
-
   _resize() {
     const container = document.getElementById(this.containerId);
     if (!container) return;
     const w = container.clientWidth;
-    this._charts.price.applyOptions({ width: w });
-    this._charts.rsi.applyOptions({ width: w });
-    this._charts.vol.applyOptions({ width: w });
-    this._charts.cvd.applyOptions({ width: w });
+    Object.values(this._charts).forEach(ch => {
+      try { ch.applyOptions({ width: w }); } catch(e) {}
+    });
   }
-
-  // ── Destroy ─────────────────────────────────────────────────────────────────
 
   destroy() {
     this._ro?.disconnect();
@@ -734,17 +600,8 @@ export class LWCChart {
   }
 }
 
-// ── Chart Manager (drop-in for draw.js) ──────────────────────────────────────
-
-/**
- * Backward-compatible bridge:
- * If LightweightCharts is available, use LWCChart.
- * Otherwise fall back to the original canvas draw.js functions.
- */
 export function initChartManager(containerId, options = {}) {
-  if (window.LightweightCharts) {
-    return new LWCChart(containerId, options);
-  }
+  if (window.LightweightCharts) return new LWCChart(containerId, options);
   console.warn('[ChartManager] LightweightCharts not loaded — falling back to canvas');
   return null;
 }
