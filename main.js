@@ -105,6 +105,7 @@ let indicatorWorker = null;
 let workerPending   = false;
 let workerQueue     = null;
 let _anchorMode     = null;
+let _initSymSeq     = 0;
 
 const SYM_RE = /^[A-Z0-9]{1,20}$/;
 
@@ -205,6 +206,7 @@ function _ensureAvwapState() {
 }
 
 export async function initSym(sym, tf) {
+  const seq = ++_initSymSeq;
   state.sym = sym;
   state.tf  = tf;
   resetCandleState();
@@ -217,6 +219,8 @@ export async function initSym(sym, tf) {
   _writeAvwapLabel();
 
   cancelPendingRender();
+  klineWs?.close();     klineWs = null;
+  tradeStream?.close(); tradeStream = null;
 
   document.querySelectorAll('#sym-group .pill-btn').forEach(b => {
     b.classList.remove('active', 'sym-active');
@@ -231,7 +235,10 @@ export async function initSym(sym, tf) {
   document.title = `${fmtSym(sym)} · ${tf} — TradingTerminal`;
   setConnStatus('warn', `Loading ${fmtSym(sym)}…`);
 
-  const res = await fetchKlinesFallback(sym, tf);
+  const candles = await fetchKlines(state.exchange, sym, tf);
+  if (seq !== _initSymSeq) return;
+
+  const res = candles?.length ? { candles, source: state.exchange } : null;
   if (res?.candles?.length) {
     res.candles.forEach(c => addCandleToState(c));
     state.openPrice = res.candles[0]?.c || 0;
@@ -251,17 +258,19 @@ export async function initSym(sym, tf) {
   computeAndRender();
   dispatchToWorker([...state.candles]);
 
-  klineWs?.close();
   klineWs = new KlineWebSocket({
     exchName: state.exchange, sym, tf,
     onCandle: (candle, confirmed) => {
+      if (seq !== _initSymSeq) return;
       if (confirmed) {
-        addCandleToState(candle);
+        const realDelta = state.currentCandle?.t === candle.t ? state.currentCandle._realDelta : undefined;
+        addCandleToState(realDelta != null ? { ...candle, _realDelta: realDelta } : candle);
         state.currentCandle = null;
         scheduleRender(RenderPriority.PARTIAL);
         dispatchToWorker([...state.candles]);
       } else {
-        state.currentCandle = candle;
+        const priorDelta = state.currentCandle?.t === candle.t ? state.currentCandle._realDelta : undefined;
+        state.currentCandle = priorDelta != null ? { ...candle, _realDelta: priorDelta } : candle;
         state.livePrice     = candle.c;
         checkAlerts(candle.c);
         scheduleRender(RenderPriority.LIVE);
@@ -271,10 +280,12 @@ export async function initSym(sym, tf) {
   });
   klineWs.connect();
 
-  tradeStream?.close();
   tradeStream = new TradeStream({
     exchName: state.exchange, sym,
-    onTick: processTradeTick,
+    onTick: tick => {
+      if (seq !== _initSymSeq) return;
+      processTradeTick(tick);
+    },
   });
   tradeStream.connect();
 
@@ -395,6 +406,27 @@ function _getLatestAvwap() {
   return (v != null && !isNaN(v)) ? v : null;
 }
 
+function _getLatestVwap() {
+  const lastVwap = state.vwapVals[state.vwapVals.length - 1] ?? null;
+  if (!state.currentCandle) return lastVwap;
+  return computeLiveVwap(
+    state.currentCandle,
+    { cumPV: state.vwapCumPV, cumV: state.vwapCumV },
+    lastVwap,
+    state.vwapSessionKey,
+  );
+}
+
+function _getLatestCvd() {
+  const lastCvd = state.cvdVals[state.cvdVals.length - 1] ?? null;
+  if (!state.currentCandle || state.currentCandle._realDelta == null) return lastCvd;
+  return state.cvdRunning + state.currentCandle._realDelta;
+}
+
+function _offsetIndexed(items, offset) {
+  return items.map(item => ({ ...item, idx: item.idx + offset }));
+}
+
 function computeAndRender() {
   const all    = [...state.candles, state.currentCandle].filter(Boolean);
   const atr    = calcATR(all, 14);
@@ -403,9 +435,13 @@ function computeAndRender() {
   state.regime = detectRegime(all, state.e20s, state.livePrice);
  
   if (all.length >= 10) {
-    state.swingPoints     = detectSwingPoints(all.slice(-60), 3, 3);
-    state.structureEvents = detectStructureBreaks(all.slice(-60), state.swingPoints);
-    state.liquiditySweeps = detectLiquiditySweeps(all.slice(-60), state.swingPoints);
+    const structureWindow = all.slice(-60);
+    const structureOffset = all.length - structureWindow.length;
+    const localSwings     = detectSwingPoints(structureWindow, 3, 3);
+
+    state.swingPoints     = _offsetIndexed(localSwings, structureOffset);
+    state.structureEvents = _offsetIndexed(detectStructureBreaks(structureWindow, localSwings), structureOffset);
+    state.liquiditySweeps = _offsetIndexed(detectLiquiditySweeps(structureWindow, localSwings), structureOffset);
     state.equalLevels     = detectEqualLevels(state.swingPoints);
     state.displacements   = detectDisplacementCandles(all, { lookback: 20 });
     state.squeezeState    = detectSqueezeBreakout(all);
@@ -440,7 +476,7 @@ function renderLive() {
 
 function _computeSignalsAndUI(all, atr, atrPct = 0) {
   const latestRSI   = state.rsiVals[state.rsiVals.length - 1];
-  const latestVwap  = state.vwapVals[state.vwapVals.length - 1];
+  const latestVwap  = _getLatestVwap();
   const latestAvwap = _getLatestAvwap();
 
   const capital  = +(dom.el['inp-capital']?.value)  || 100;
@@ -458,7 +494,7 @@ function _computeSignalsAndUI(all, atr, atrPct = 0) {
   });
   if (sug) state.suggestion = sug;
 
-  const cvdLast = state.cvdVals[state.cvdVals.length - 1];
+  const cvdLast = _getLatestCvd();
   const quality = scoreEntryQuality({
     dir: state.currentDir, rsi: latestRSI, e9: state.e9, e20: state.e20, e50: state.e50,
     price: state.livePrice, vwap: latestVwap,
@@ -510,18 +546,21 @@ function drawAll() {
   });
   if (state.suggestion?.entry) _lwcChart.setSuggestion(state.suggestion);
   if (state.sessionLevels)     _lwcChart.setSessionLevels(state.sessionLevels);
-  if (state.structureEvents?.length) {
-    _lwcChart.setStructureEvents(state.candles, state.structureEvents);
-  }
+  _lwcChart.setStructureEvents(state.candles, state.structureEvents || []);
 }
 
 function drawLive() {
   if (!_lwcChart || !state.currentCandle) return;
 
   const c = { ...state.currentCandle };
-  c._liveVwap = state.vwapVals[state.vwapVals.length - 1];
+  c._liveVwap = _getLatestVwap();
+  c._liveBands = computeLiveBands(c, {
+    cumPV: state.vwapCumPV,
+    cumV:  state.vwapCumV,
+    m2:    state.vwapM2,
+  }, c._liveVwap);
   c._liveRsi  = state.rsiVals[state.rsiVals.length - 1];
-  c._liveCvd  = state.cvdVals[state.cvdVals.length - 1];
+  c._liveCvd  = _getLatestCvd();
 
   if (state.anchorIdx !== null && state.avwapCumV > 0) {
     const tp    = (c.h + c.l + c.c) / 3;
@@ -536,7 +575,7 @@ function drawLive() {
 
 function initIndicatorWorker() {
   try {
-    indicatorWorker = new Worker('./workers/indicator.worker.js');
+    indicatorWorker = new Worker(new URL('./workers/indicator.worker.js', import.meta.url));
     indicatorWorker.onmessage = e => {
       workerPending = false;
       if (e.data.type === 'result') onWorkerResult(e.data);
@@ -563,9 +602,10 @@ function onWorkerResult(data) {
 }
 
 function processTradeTick({ price, qty, side }) {
+  const signedQty = side === 'buy' ? qty : -qty;
   if (side === 'buy') { state.tradeStreamDelta += qty; state.tradeBuyVol  += qty; }
   else                { state.tradeStreamDelta -= qty; state.tradeSellVol += qty; }
-  if (state.currentCandle) state.currentCandle._realDelta = state.tradeStreamDelta;
+  if (state.currentCandle) state.currentCandle._realDelta = (state.currentCandle._realDelta || 0) + signedQty;
   state.tradeTickBuf.push({ price, side, ts: Date.now() });
   if (state.tradeTickBuf.length > 50) state.tradeTickBuf.shift();
   updateDeltaTicker();

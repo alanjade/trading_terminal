@@ -14,6 +14,7 @@ body {
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
 
 /* ── Layout ─────────────────────────────────────────────────────────────── */
@@ -31,6 +32,7 @@ body {
   padding: var(--sp-4);
   margin-bottom: var(--sp-3);
   position: relative;
+  min-width: 0;
 }
 
 .card--accent-top::before {
@@ -63,6 +65,8 @@ body {
   margin-bottom: var(--sp-3);
   cursor: pointer;
   user-select: none;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 
 .card-title {
@@ -72,6 +76,10 @@ body {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-chevron {
@@ -95,6 +103,7 @@ body {
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
   white-space: nowrap;
+  max-width: 100%;
 }
 .btn:hover { border-color: var(--border3); color: var(--text); }
 
@@ -131,6 +140,8 @@ body {
   border-radius: var(--radius-pill);
   padding: 2px;
   gap: 2px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .pill-btn {
@@ -145,6 +156,7 @@ body {
   cursor: pointer;
   transition: all 0.15s;
   letter-spacing: 0.04em;
+  min-width: 0;
 }
 .pill-btn:hover { color: var(--text); }
 .pill-btn.active {
@@ -203,6 +215,7 @@ input[type=range]::-webkit-slider-thumb {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 12px;
+  min-width: 0;
 }
 .stat-item.good   { border-color: rgba(0,229,160,0.25);  background: rgba(0,229,160,0.04); }
 .stat-item.warn   { border-color: rgba(255,184,46,0.25); background: rgba(255,184,46,0.04); }
@@ -221,6 +234,7 @@ input[type=range]::-webkit-slider-thumb {
   font-size: 16px;
   font-weight: 700;
   line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 .stat-sub {
   font-family: var(--mono);
@@ -294,6 +308,7 @@ input[type=range]::-webkit-slider-thumb {
   border-radius: var(--radius-sm);
   padding: 10px 12px;
   margin-bottom: 6px;
+  min-width: 0;
 }
 .jrn-row-header {
   display: flex;
@@ -316,7 +331,7 @@ input[type=range]::-webkit-slider-thumb {
 .jrn-row-details { display: flex; flex-wrap: wrap; gap: 6px; }
 .jrn-detail { font-family: var(--mono); font-size: 9px; color: var(--text2); background: var(--bg4); padding: 1px 6px; border-radius: var(--radius-xs); }
 .jrn-mistakes { font-family: var(--mono); font-size: 9px; color: var(--amber); margin-top: 4px; }
-.jrn-notes-preview { font-size: 10px; color: var(--text3); margin-top: 4px; line-height: 1.4; font-style: italic; }
+.jrn-notes-preview { font-size: 10px; color: var(--text3); margin-top: 4px; line-height: 1.4; font-style: italic; overflow-wrap: anywhere; }
 .jrn-empty { text-align: center; padding: 24px; color: var(--text3); font-family: var(--mono); font-size: 10px; }
 .jrn-behavioral-warn { font-family: var(--mono); font-size: 9px; color: var(--amber); background: rgba(255,184,46,0.07); border: 1px solid rgba(255,184,46,0.2); border-radius: var(--radius-sm); padding: 7px 10px; margin-top: 8px; }
 .jrn-setup-breakdown { margin-top: 10px; }
@@ -359,6 +374,9 @@ input[type=range]::-webkit-slider-thumb {
   pointer-events: none;
   z-index: 1000;
   white-space: nowrap;
+  max-width: calc(100vw - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .toast.show {
   transform: translateX(-50%) translateY(0);
@@ -384,3 +402,41 @@ input[type=range]::-webkit-slider-thumb {
 .score-bar { display: inline-flex; align-items: center; gap: 4px; }
 .score-track { width: 36px; height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; border: 1px solid var(--border); }
 .score-fill  { height: 100%; border-radius: 2px; }
+
+@media (max-width: 560px) {
+  body {
+    font-size: 12px;
+  }
+  .card {
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .card-header {
+    align-items: flex-start;
+  }
+  .btn {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .btn--icon {
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+  .pill-btn {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .stat-item {
+    padding: 8px 9px;
+  }
+  .stat-val {
+    font-size: 14px;
+  }
+  .jrn-row-time,
+  .jrn-row-actions {
+    margin-left: 0;
+  }
+  .jrn-row-actions {
+    width: 100%;
+  }
+}

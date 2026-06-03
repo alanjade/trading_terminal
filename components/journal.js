@@ -43,6 +43,12 @@ export const MISTAKES = [
 let trades = [];
 let editingId = null;
 
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 export function initJournal() {
   trades = loadJournal();
   renderJournalList();
@@ -181,11 +187,17 @@ export function renderJournalList(filter = 'all') {
     const setupLabel = SETUPS.find(s => s.id === t.setup)?.label || t.setup;
     const mistakeWarnings = (t.mistakes || []).filter(m => m !== 'none')
       .map(m => MISTAKES.find(x => x.id === m)?.label).join(', ');
+    const symLabel = escHtml(String(t.sym || '').replace('USDT',''));
+    const dirLabel = escHtml(String(t.dir || '').toUpperCase());
+    const tfLabel = escHtml(t.tf || '');
+    const setupText = escHtml(setupLabel || '');
+    const mistakeText = escHtml(mistakeWarnings);
+    const notesPreview = escHtml(String(t.notes || '').slice(0, 120));
 
     return `<div class="jrn-row" data-id="${t.id}">
       <div class="jrn-row-header">
-        <span class="jrn-row-sym">${t.sym.replace('USDT','')} <span style="color:${dirCol}">${dirIcon} ${t.dir.toUpperCase()}</span></span>
-        <span class="jrn-row-tf">${t.tf}</span>
+        <span class="jrn-row-sym">${symLabel} <span style="color:${dirCol}">${dirIcon} ${dirLabel}</span></span>
+        <span class="jrn-row-tf">${tfLabel}</span>
         <span class="jrn-row-time">${relativeTime(t.timestamp)}</span>
         <span class="jrn-row-result ${resultCls}">${resultLabel}</span>
         <span class="jrn-row-pnl ${resultCls}">${pnlStr}</span>
@@ -203,11 +215,11 @@ export function renderJournalList(filter = 'all') {
         <span class="jrn-detail">
           <span style="color:${emotion.color}">${emotion.label}</span>
         </span>
-        <span class="jrn-detail">${setupLabel}</span>
+        <span class="jrn-detail">${setupText}</span>
         ${t.score ? `<span class="jrn-detail">Score ${t.score}</span>` : ''}
       </div>
-      ${mistakeWarnings ? `<div class="jrn-mistakes">⚠ ${mistakeWarnings}</div>` : ''}
-      ${t.notes ? `<div class="jrn-notes-preview">${t.notes.slice(0,120)}${t.notes.length>120?'…':''}</div>` : ''}
+      ${mistakeWarnings ? `<div class="jrn-mistakes">⚠ ${mistakeText}</div>` : ''}
+      ${t.notes ? `<div class="jrn-notes-preview">${notesPreview}${t.notes.length>120?'…':''}</div>` : ''}
     </div>`;
   }).join('');
 }

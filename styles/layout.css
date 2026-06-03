@@ -28,9 +28,9 @@
   white-space: nowrap;
 }
 
-.topbar-left  { display: flex; align-items: center; gap: 10px; }
-.topbar-center{ display: flex; align-items: center; gap: 6px;  flex-wrap: wrap; }
-.topbar-right { display: flex; align-items: center; gap: 10px; }
+.topbar-left  { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.topbar-center{ display: flex; align-items: center; gap: 6px;  flex-wrap: wrap; min-width: 0; flex: 1 1 360px; justify-content: center; }
+.topbar-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
 
 /* Connection status */
 .conn-status {
@@ -50,6 +50,8 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .live-price {
   font-family: var(--mono);
@@ -66,7 +68,7 @@
 /* ── App Layout (3-column) ───────────────────────────────────────────────── */
 .app-layout {
   display: grid;
-  grid-template-columns: 220px 1fr 240px;
+  grid-template-columns: minmax(190px, 220px) minmax(0, 1fr) minmax(210px, 240px);
   gap: 12px;
   padding: 12px 14px;
   max-width: 1600px;
@@ -85,6 +87,8 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 /* ── Suggestion Card ─────────────────────────────────────────────────────── */
@@ -162,7 +166,8 @@
 
 /* Partial TPs */
 .tp-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 8px;
 }
@@ -363,7 +368,7 @@
 /* ── Journal Layout ──────────────────────────────────────────────────────── */
 .journal-layout {
   display: grid;
-  grid-template-columns: 360px 1fr;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -387,12 +392,12 @@
 .jrn-list-panel { max-height: 440px; overflow-y: auto; }
 
 /* ── Screener ────────────────────────────────────────────────────────────── */
-.scr-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.scr-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; min-width: 0; }
 .scr-tfs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
 .scr-progress { margin-bottom: 8px; }
-.scr-table-wrap { overflow-x: auto; }
+.scr-table-wrap { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
 .scr-table {
-  width: 100%; border-collapse: collapse;
+  width: 100%; min-width: 760px; border-collapse: collapse;
   font-family: var(--mono); font-size: 10px;
 }
 .scr-table th {
@@ -452,14 +457,101 @@
   .col-right > .card { margin-bottom: 0; }
 }
 
+@media (max-width: 920px) {
+  .topbar {
+    align-items: flex-start;
+  }
+  .topbar-center {
+    order: 3;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+  .topbar-right {
+    margin-left: auto;
+  }
+}
+
 @media (max-width: 780px) {
+  .topbar {
+    padding: 8px 10px;
+    gap: 8px;
+  }
   .app-layout {
     grid-template-columns: 1fr;
+    padding: 10px;
+    gap: 10px;
   }
-  .col-left { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  .col-left { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
   .col-left > .card { margin-bottom: 0; }
   .col-right { grid-template-columns: 1fr; }
   .journal-layout { grid-template-columns: 1fr; }
   .sug-levels { grid-template-columns: 1fr 1fr; }
-  .topbar-center { display: none; }
+  .bottom-row { padding: 0 10px 10px; }
+  .chart-header-right { justify-content: flex-start; }
+  .pnl-log-btns { flex-wrap: wrap; }
+}
+
+@media (max-width: 560px) {
+  .topbar-left,
+  .topbar-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .topbar-center {
+    display: flex;
+  }
+  .price-display {
+    gap: 6px;
+  }
+  .live-price {
+    font-size: 16px;
+  }
+  .conn-status {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .col-left {
+    grid-template-columns: 1fr;
+  }
+  .sug-levels,
+  .tp-row,
+  .ema-grid,
+  .pnl-summary {
+    grid-template-columns: 1fr;
+  }
+  .stat-grid,
+  .jrn-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fee-type-row,
+  .fut-input-row,
+  .jrn-form-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .fut-lbl,
+  .jrn-form-row .fut-lbl {
+    min-width: 0;
+  }
+  .scr-controls > *,
+  .replay-controls > * {
+    max-width: 100%;
+  }
+  .kbd-legend {
+    display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .app-layout,
+  .bottom-row {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .stat-grid,
+  .jrn-stats-grid {
+    grid-template-columns: 1fr;
+  }
 }

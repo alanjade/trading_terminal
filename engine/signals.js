@@ -166,18 +166,19 @@ export function scoreEntryQuality({
   // ── Displacement candle bonus (max 15) ────────────────────────────────────
   // Recent displacement in signal direction = institutional momentum confirmation
   if (displacements && displacements.length > 0) {
+    const signalDispDir = dir === 'long' ? 'bull' : 'bear';
     const recentDisp = displacements
       .filter(d => d.recencyBars !== undefined ? d.recencyBars <= 5 : true)
       .slice(0, 3);
 
-    const alignedDisp = recentDisp.find(d => d.dir === dir);
+    const alignedDisp = recentDisp.find(d => d.dir === signalDispDir);
     if (alignedDisp) {
       const bonus = Math.min(15, Math.round(alignedDisp.magnitude * 5));
       score += bonus;
       factors.push(`Displacement candle ${alignedDisp.magnitude.toFixed(1)}×ATR${alignedDisp.volConfirmed ? ' + vol' : ''}`);
     }
 
-    const opposingDisp = recentDisp.find(d => d.dir !== dir);
+    const opposingDisp = recentDisp.find(d => d.dir !== signalDispDir);
     if (opposingDisp && !alignedDisp) {
       score -= 8;
       factors.push('Recent displacement against signal');

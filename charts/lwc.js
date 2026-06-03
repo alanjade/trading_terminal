@@ -38,6 +38,7 @@ export class LWCChart {
     this._charts      = {};
     this._series      = {};
     this._drawings    = [];
+    this._paneHeights = { price: 320, rsi: 70, vol: 44, cvd: 60 };
     this._activeTool  = TOOL.NONE;
     this._drawingStart= null;
     this._tempLine    = null;
@@ -57,15 +58,17 @@ export class LWCChart {
     container.innerHTML = '';
     container.style.position = 'relative';
 
-    this._priceEl = this._pane(container, 'lwc-price', 320);
-    this._rsiEl   = this._pane(container, 'lwc-rsi',   70);
-    this._volEl   = this._pane(container, 'lwc-vol',   44);
-    this._cvdEl   = this._pane(container, 'lwc-cvd',   60);
+    this._applyResponsivePaneHeights(container.clientWidth);
 
-    this._charts.price = this._createChart(this._priceEl, 320, true);
-    this._charts.rsi   = this._createChart(this._rsiEl,   70,  false);
-    this._charts.vol   = this._createChart(this._volEl,   44,  false);
-    this._charts.cvd   = this._createChart(this._cvdEl,   60,  false);
+    this._priceEl = this._pane(container, 'lwc-price', this._paneHeights.price);
+    this._rsiEl   = this._pane(container, 'lwc-rsi',   this._paneHeights.rsi);
+    this._volEl   = this._pane(container, 'lwc-vol',   this._paneHeights.vol);
+    this._cvdEl   = this._pane(container, 'lwc-cvd',   this._paneHeights.cvd);
+
+    this._charts.price = this._createChart(this._priceEl, this._paneHeights.price, true);
+    this._charts.rsi   = this._createChart(this._rsiEl,   this._paneHeights.rsi,   false);
+    this._charts.vol   = this._createChart(this._volEl,   this._paneHeights.vol,   false);
+    this._charts.cvd   = this._createChart(this._cvdEl,   this._paneHeights.cvd,   false);
 
     const C = this.C;
     this._series.candles = this._charts.price.addCandlestickSeries({
@@ -107,6 +110,16 @@ export class LWCChart {
     el.style.cssText = `width:100%;height:${height}px;position:relative;`;
     parent.appendChild(el);
     return el;
+  }
+
+  _applyResponsivePaneHeights(width) {
+    if (width <= 420) {
+      this._paneHeights = { price: 260, rsi: 56, vol: 38, cvd: 50 };
+    } else if (width <= 720) {
+      this._paneHeights = { price: 290, rsi: 62, vol: 40, cvd: 54 };
+    } else {
+      this._paneHeights = { price: 320, rsi: 70, vol: 44, cvd: 60 };
+    }
   }
 
   _createChart(el, height, hasTimeScale) {
@@ -287,7 +300,11 @@ export class LWCChart {
   }
 
   setStructureEvents(candles, events) {
-    if (!events?.length || !candles?.length) return;
+    if (!events?.length || !candles?.length) {
+      this._series.candles.setMarkers([]);
+      this._markers = [];
+      return;
+    }
     const toTime = c => Math.floor(c.t / 1000);
     const C = this.C;
     const markers = events.slice(-8).map(ev => {
@@ -336,8 +353,8 @@ export class LWCChart {
     const bar = document.createElement('div');
     bar.className = 'lwc-toolbar';
     bar.style.cssText = `
-      position:absolute; top:6px; left:8px; z-index:10;
-      display:flex; gap:4px; align-items:center;
+      position:absolute; top:6px; left:8px; right:8px; z-index:10;
+      display:flex; gap:4px; align-items:center; flex-wrap:wrap; width:max-content; max-width:calc(100% - 16px);
       background:rgba(17,21,32,0.92); border:1px solid rgba(255,255,255,0.08);
       border-radius:6px; padding:3px 5px;
       font-family:'JetBrains Mono',monospace; font-size:10px;
@@ -587,8 +604,16 @@ export class LWCChart {
     const container = document.getElementById(this.containerId);
     if (!container) return;
     const w = container.clientWidth;
-    Object.values(this._charts).forEach(ch => {
-      try { ch.applyOptions({ width: w }); } catch(e) {}
+    this._applyResponsivePaneHeights(w);
+    const panePairs = [
+      [this._priceEl, this._charts.price, this._paneHeights.price],
+      [this._rsiEl,   this._charts.rsi,   this._paneHeights.rsi],
+      [this._volEl,   this._charts.vol,   this._paneHeights.vol],
+      [this._cvdEl,   this._charts.cvd,   this._paneHeights.cvd],
+    ];
+    panePairs.forEach(([el, ch, height]) => {
+      if (el) el.style.height = height + 'px';
+      try { ch.applyOptions({ width: w, height }); } catch(e) {}
     });
   }
 

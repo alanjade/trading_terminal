@@ -117,7 +117,6 @@ export function calcATRArray(candles, period = 14) {
         return a + Math.max(cc.h - cc.l, Math.abs(cc.h - pp.c), Math.abs(cc.l - pp.c));
       }, 0);
       atr = sum / period;
-      result[period] = atr; // overwrite null
       result.push(atr);
     } else {
       atr = (atr * (period - 1) + tr) / period;
@@ -195,14 +194,15 @@ export function computeLiveVwap(currentCandle, vwapState, lastVwap, vwapSessionK
   if (!currentCandle) return lastVwap;
   const { cumPV, cumV } = vwapState;
   const tp = (currentCandle.h + currentCandle.l + currentCandle.c) / 3;
+  const liveCumV = cumV + Math.max(0, currentCandle.v || 0);
   if (!currentCandle.t) {
-    return cumV > 0 ? (cumPV + tp * currentCandle.v) / (cumV + currentCandle.v) : tp;
+    return liveCumV > 0 ? (cumPV + tp * Math.max(0, currentCandle.v || 0)) / liveCumV : tp;
   }
   const d   = new Date(currentCandle.t);
   const key = `${d.getUTCFullYear()}-${d.getUTCMonth()+1}-${d.getUTCDate()}`;
   if (key !== vwapSessionKey) return tp;
-  if (cumV <= 0) return tp;
-  return (cumPV + tp * currentCandle.v) / (cumV + currentCandle.v);
+  if (liveCumV <= 0) return tp;
+  return (cumPV + tp * Math.max(0, currentCandle.v || 0)) / liveCumV;
 }
 
 /** Compute live VWAP bands using Welford's running M2 */
@@ -210,9 +210,10 @@ export function computeLiveBands(currentCandle, vwapState, liveVwap) {
   if (!liveVwap || !currentCandle) return null;
   const { cumPV, cumV, m2 } = vwapState;
   const tp       = (currentCandle.h + currentCandle.l + currentCandle.c) / 3;
+  const vol      = Math.max(0, currentCandle.v || 0);
   const oldVwap  = cumV > 0 ? cumPV / cumV : tp;
-  const liveM2   = m2 + currentCandle.v * (tp - oldVwap) * (tp - liveVwap);
-  const liveCumV = cumV + currentCandle.v;
+  const liveM2   = m2 + vol * (tp - oldVwap) * (tp - liveVwap);
+  const liveCumV = cumV + vol;
   const variance = liveCumV > 0 ? Math.max(0, liveM2 / liveCumV) : 0;
   const sd       = Math.sqrt(variance);
   return { v1u: liveVwap + sd, v1l: liveVwap - sd, v2u: liveVwap + 2*sd, v2l: liveVwap - 2*sd };

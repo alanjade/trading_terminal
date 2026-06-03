@@ -275,11 +275,13 @@ export function detectDisplacementCandles(candles, options = {}) {
     const volMultiple = avgVol > 0 ? c.v / avgVol : 1;
     const volConfirmed = volMultiple >= volThreshold;
 
-    const magnitude = body / avgAtr; // how many ATRs the body is
-    const dir       = isBull ? 'bull' : 'bear';
+    const magnitude   = body / avgAtr; // how many ATRs the body is
+    const dir         = isBull ? 'bull' : 'bear';
+    const recencyBars = slice.length - 1 - i;
+    const strength    = magnitude >= 3 ? 'extreme' : magnitude >= 2 ? 'strong' : 'moderate';
 
     displacements.push({
-      idx:          candles.length - lookback + i,
+      idx:          candles.length - slice.length + i,
       ts:           c.t || 0,
       dir,
       openPrice:    c.o,
@@ -288,6 +290,8 @@ export function detectDisplacementCandles(candles, options = {}) {
       low:          c.l,
       body,
       magnitude,      // in ATR units — higher = more powerful
+      recencyBars,
+      strength,
       volConfirmed,
       volMultiple,
       // Fair Value Gap: the price gap left by the displacement
@@ -413,20 +417,21 @@ export function getSessionLevels(candles) {
   const now = new Date();
   const todayKey = `${now.getUTCFullYear()}-${now.getUTCMonth()+1}-${now.getUTCDate()}`;
 
-  let todayCandles = [], prevCandles = [];
-  let prevKey = null;
+  const byDay = new Map();
 
   candles.forEach(c => {
     if (!c.t) return;
     const d = new Date(c.t);
     const key = `${d.getUTCFullYear()}-${d.getUTCMonth()+1}-${d.getUTCDate()}`;
-    if (key === todayKey) {
-      todayCandles.push(c);
-    } else {
-      if (!prevKey) prevKey = key;
-      if (key === prevKey) prevCandles.push(c);
-    }
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(c);
   });
+
+  const todayCandles = byDay.get(todayKey) || [];
+  const prevKey = [...byDay.keys()]
+    .filter(key => key !== todayKey)
+    .sort((a, b) => new Date(b) - new Date(a))[0] || null;
+  const prevCandles = prevKey ? byDay.get(prevKey) : [];
 
   const todayHigh = todayCandles.length ? Math.max(...todayCandles.map(c => c.h)) : null;
   const todayLow  = todayCandles.length ? Math.min(...todayCandles.map(c => c.l)) : null;
