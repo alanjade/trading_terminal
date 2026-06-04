@@ -87,7 +87,7 @@ export function calcFuturesMetrics({
   let bePrice = 0;
   if (entry > 0 && posSize > 0) {
     const tokens = posSize / entry;
-    const beMove = tokens > 0 ? feeOpen / tokens : 0;
+    const beMove = tokens > 0 ? feeTot / tokens : 0;
     bePrice = isLong ? entry + beMove : entry - beMove;
   }
 

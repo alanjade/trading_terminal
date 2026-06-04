@@ -316,11 +316,16 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
     reason = `RSI overbought at ${Math.round(rsi)} with EMA9 below EMA50. Fade setup.${avwapNote} SL above 5-candle high.`;
 
   } else {
-    dir    = 'long';
-    entry  = e9;
-    stop   = e50 * 0.999;
-    target = entry + (entry - stop) * rrRatio;
-    reason = `EMAs are tangled — low conviction. Waiting for EMA9/20 to separate cleanly. Tentative levels shown near EMA9.${avwapNote}`;
+    const fallbackDir = e9 >= e50 ? 'long' : 'short';
+    dir    = fallbackDir;
+    entry  = livePrice;
+    stop   = fallbackDir === 'long'
+      ? Math.min(e20, e50) * 0.999
+      : Math.max(e20, e50) * 1.001;
+    target = fallbackDir === 'long'
+      ? entry + (entry - stop) * rrRatio
+      : entry - (stop - entry) * rrRatio;
+    reason = `EMAs are tangled — low conviction. Waiting for EMA9/20 to separate cleanly. Using current price with a neutral-bias stop.${avwapNote}`;
   }
 
   return { dir, entry, stop, target, reason };

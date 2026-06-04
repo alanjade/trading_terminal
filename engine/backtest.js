@@ -126,8 +126,10 @@ class Trade {
       ? exitPrice - this.entryPrice
       : this.entryPrice - exitPrice;
 
-    const grossPnl = (priceDiff / this.entryPrice) * this.size / (this._leverage || 1);
-    const fees     = (this.size / (this._leverage || 1)) * feeRate * 2;
+    // this.size is the notional position value (USD), so P&L and fees
+    // must be computed on that value directly rather than dividing again by leverage.
+    const grossPnl = (priceDiff / this.entryPrice) * this.size;
+    const fees     = this.size * feeRate * 2;
     this.pnl       = grossPnl - fees;
 
     const risk = Math.abs(this.entryPrice - this.stopPrice);
@@ -297,7 +299,7 @@ export class BacktestEngine {
           if (stopDist <= 0) continue;
 
           const riskUSD = equity * (this.riskPct / 100);
-          const tokens  = (riskUSD * this.leverage) / stopDist;
+          const tokens  = riskUSD / stopDist;
           const size    = tokens * entry;
 
           const tp1 = dir === 'long' ? entry + stopDist                : entry - stopDist;
