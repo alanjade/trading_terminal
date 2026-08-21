@@ -283,34 +283,49 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
 
   let dir, entry, stop, target, reason;
 
+  // Entry price: previously this was always livePrice, which meant a
+  // "locked" suggestion effectively meant "the price the moment it locked" —
+  // not an actual planned entry level. Now we compute a pullback entry
+  // (the EMA9/EMA20 midpoint "balanced" zone from computeEntryZones) and
+  // use that instead, UNLESS price has already reached/passed that zone —
+  // in which case there's nothing to wait for, so we use livePrice directly.
+  function planEntry(bullDir) {
+    const zones = computeEntryZones({ e9, e20, livePrice, suggestion: { dir: bullDir }, atr });
+    if (!zones) return { entry: livePrice, pulledBack: false };
+    const already = bullDir === 'long' ? livePrice <= zones.balanced : livePrice >= zones.balanced;
+    return already
+      ? { entry: livePrice, pulledBack: false }
+      : { entry: zones.balanced, pulledBack: true };
+  }
+
   if (bullish && rsi < 65) {
     dir   = 'long';
-    entry = livePrice;
+    ({ entry } = planEntry(dir));
     const stopCandidates = [e20, localLow];
     if (avwap != null && livePrice > avwap) stopCandidates.push(avwap);
     stop   = Math.min(...stopCandidates) * 0.9995;
     target = entry + (entry - stop) * rrRatio;
-    reason = `Bullish EMA stack (9>${e9.toFixed(4)} > 20>${e20.toFixed(4)} > 50>${e50.toFixed(4)}). RSI ${Math.round(rsi)} — momentum intact.${vwapNote}${avwapNote}${fibNote} SL below EMA20 / 5-candle low${avwap != null && livePrice > avwap ? ' / AVWAP' : ''}.`;
+    reason = `Bullish EMA stack (9>${e9.toFixed(4)} > 20>${e20.toFixed(4)} > 50>${e50.toFixed(4)}). RSI ${Math.round(rsi)} — momentum intact.${vwapNote}${avwapNote}${fibNote} SL below EMA20 / 5-candle low${avwap != null && livePrice > avwap ? ' / AVWAP' : ''}.${entry < livePrice ? ` Entry set at pullback zone (${entry.toFixed(4)}) rather than current price (${livePrice.toFixed(4)}).` : ''}`;
 
   } else if (bearish && rsi > 35) {
     dir   = 'short';
-    entry = livePrice;
+    ({ entry } = planEntry(dir));
     const stopCandidates = [e20, localHigh];
     if (avwap != null && livePrice < avwap) stopCandidates.push(avwap);
     stop   = Math.max(...stopCandidates) * 1.0005;
     target = entry - (stop - entry) * rrRatio;
-    reason = `Bearish EMA stack (9<${e9.toFixed(4)} < 20<${e20.toFixed(4)} < 50<${e50.toFixed(4)}). RSI ${Math.round(rsi)} — downside pressure.${vwapNote}${avwapNote}${fibNote} SL above EMA20 / 5-candle high${avwap != null && livePrice < avwap ? ' / AVWAP' : ''}.`;
+    reason = `Bearish EMA stack (9<${e9.toFixed(4)} < 20<${e20.toFixed(4)} < 50<${e50.toFixed(4)}). RSI ${Math.round(rsi)} — downside pressure.${vwapNote}${avwapNote}${fibNote} SL above EMA20 / 5-candle high${avwap != null && livePrice < avwap ? ' / AVWAP' : ''}.${entry > livePrice ? ` Entry set at pullback zone (${entry.toFixed(4)}) rather than current price (${livePrice.toFixed(4)}).` : ''}`;
 
   } else if (rsi < 35 && e9 > e50) {
     dir    = 'long';
-    entry  = livePrice;
+    entry  = livePrice; // mean-reversion bounce — the oversold condition IS the entry trigger, no pullback to wait for
     stop   = localLow * 0.999;
     target = entry + (entry - stop) * rrRatio;
     reason = `RSI oversold at ${Math.round(rsi)} while price holds above EMA50. Mean-reversion bounce setup.${avwapNote} SL below 5-candle low.`;
 
   } else if (rsi > 65 && e9 < e50) {
     dir    = 'short';
-    entry  = livePrice;
+    entry  = livePrice; // same — overbought fade triggers immediately, no pullback plan applies
     stop   = localHigh * 1.001;
     target = entry - (stop - entry) * rrRatio;
     reason = `RSI overbought at ${Math.round(rsi)} with EMA9 below EMA50. Fade setup.${avwapNote} SL above 5-candle high.`;
@@ -318,7 +333,7 @@ export function computeSuggestion({ e9, e20, e50, livePrice, rsi, rrRatio, tf, c
   } else {
     const fallbackDir = e9 >= e50 ? 'long' : 'short';
     dir    = fallbackDir;
-    entry  = livePrice;
+    entry  = livePrice; // low-conviction — no setup worth planning a pullback around
     stop   = fallbackDir === 'long'
       ? Math.min(e20, e50) * 0.999
       : Math.max(e20, e50) * 1.001;

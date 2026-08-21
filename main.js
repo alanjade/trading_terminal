@@ -551,6 +551,20 @@ function updateFundingUI() {
 // rate itself (fetchFundingRate has its own 2min TTL cache).
 setInterval(() => { if (state.fundingInfo) updateFundingUI(); }, 30_000);
 
+// The locked-suggestion "(locked Xm ago)" label previously only updated
+// when a full render happened (price tick, candle close, user action).
+// If price goes quiet, it froze — e.g. still saying "just now" after 20
+// real minutes. This refreshes just that label on a timer, independent
+// of the render pipeline, so it stays honest even during quiet periods.
+setInterval(() => {
+  const sug = state.lockedSuggestion;
+  const ageEl = dom.lazy('sug-locked-age');
+  if (!sug?.lockedAt || !ageEl) return;
+  if (sug.manual) { ageEl.textContent = '(pinned)'; return; }
+  const mins = Math.max(0, Math.round((Date.now() - sug.lockedAt) / 60000));
+  ageEl.textContent = mins < 1 ? '(just now)' : `(locked ${mins}m ago)`;
+}, 15_000);
+
 // Warns when the tracked stop sits right on top of a recent liquidity
 // sweep or an equal-highs/lows cluster — classic stop-hunt territory,
 // since market makers/algos are known to target exactly these pockets
