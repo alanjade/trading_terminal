@@ -143,7 +143,19 @@ function _search(q) {
     }
   }
 
-  return results.slice(0, 8);
+  const trimmed = results.slice(0, 7);
+
+  // Not every tradeable token is in the curated ALL_SYMBOLS list — this app
+  // isn't limited to it, so if nothing curated matched exactly, offer a
+  // free-form "use <TICKER>USDT" option that just hands the raw symbol
+  // straight to the exchange. If it's not a real pair, the kline fetch will
+  // fail with a normal error toast — same as typing a bad symbol anywhere else.
+  const hasExact = trimmed.some(r => r.exact);
+  if (!hasExact && q.length >= 2) {
+    trimmed.push({ sym: base, ticker: q, tier: null, exact: false, freeform: true });
+  }
+
+  return trimmed;
 }
 
 // ── Dropdown rendering ────────────────────────────────────────────────────────
@@ -159,10 +171,21 @@ function _renderDropdown() {
   }
 
   dd.innerHTML = _results.map((r, i) => {
+    const active = i === _focusIdx ? ' gs-item--active' : '';
+
+    if (r.freeform) {
+      return `
+        <div class="gs-item gs-item--freeform${active}" role="option" data-sym="${r.sym}" data-idx="${i}">
+          <span class="gs-ticker">${r.ticker}</span>
+          <span class="gs-pair">/USDT</span>
+          <span class="gs-freeform-tag">not in curated list — try it anyway</span>
+        </div>
+      `;
+    }
+
     const tierBadge = r.tier
       ? `<span class="gs-tier gs-tier--${r.tier.toLowerCase()}">${r.tier}</span>`
       : '';
-    const active = i === _focusIdx ? ' gs-item--active' : '';
     return `
       <div class="gs-item${active}" role="option" data-sym="${r.sym}" data-idx="${i}">
         <span class="gs-ticker">${r.ticker}</span>
@@ -372,6 +395,14 @@ function _injectStyles() {
 .gs-item:last-child { border-bottom: none; }
 .gs-item:hover, .gs-item--active {
   background: var(--bg3);
+}
+.gs-item--freeform { opacity: 0.85; }
+.gs-freeform-tag {
+  margin-left: auto;
+  font-size: 8px;
+  color: var(--text3);
+  font-style: italic;
+  white-space: nowrap;
 }
 .gs-ticker { font-weight: 700; }
 .gs-pair   { color: var(--text3); font-size: 9px; }

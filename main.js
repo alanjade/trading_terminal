@@ -1828,14 +1828,37 @@ function renderScreenerTable() {
                   : r.trendAge <= 40 ? 'var(--text3)'
                   :                    '#ff3d5a';
 
-    let fibTxt = '—', fibCol = 'var(--text3)';
+    let fibTxt = '—', fibCol = 'var(--text3)', fibTitle = 'No Fib level within range of current price';
     if (r.fibProximity) {
-      const { label, tier, dir, dirLabel } = r.fibProximity;
+      const { label, tier, dir, dirLabel, fibPrice, distPct, distPctOfRange } = r.fibProximity;
       fibTxt = `${label} ${dirLabel}`;
       fibCol = tier === 'gold' ? '#a78bff'
              : tier === 'key'  ? '#4da6ff'
              :                   'var(--text2)';
+      const tierName = tier === 'gold' ? 'Golden ratio (strongest)' : tier === 'key' ? 'Key level' : tier === 'minor' ? 'Minor level' : 'Extension';
+      fibTitle = `${label} Fib retracement @ ${fmt(fibPrice)} (${tierName})\n`
+               + `${dir === 'resistance' ? 'Acting as resistance' : dir === 'support' ? 'Acting as support' : 'Flat / unclear role'} — price is ${distPct.toFixed(2)}% away\n`
+               + `Based on the 50-candle swing range on this timeframe`;
     }
+
+    const symTitle  = escHtml(`${fmtSym(r.sym)} on ${r.primaryTf || 'primary'} TF — click to load into the chart\nEMA9 ${fmt(r.e9)} / EMA20 ${fmt(r.e20)} / EMA50 ${fmt(r.e50)}`);
+    const priceTitle = `Last price at scan time (${r.fetchedAt ? new Date(r.fetchedAt).toLocaleTimeString() : 'unknown time'})`;
+    const chgTitle  = '24h price change %';
+    const signalTitle = `${r.signalLabel} — derived from EMA9/20/50 ordering\nEMA9 ${fmt(r.e9)} · EMA20 ${fmt(r.e20)} · EMA50 ${fmt(r.e50)}`;
+    const rsiTitle  = r.rsi !== null
+      ? `RSI-14: ${r.rsi.toFixed(1)} — ${r.rsi >= 70 ? 'overbought (≥70)' : r.rsi <= 30 ? 'oversold (≤30)' : 'neutral range'}`
+      : 'RSI unavailable';
+    const scoreTitle = `Composite setup score: ${r.score}/100\nBlends EMA stack, RSI, volume, MTF confluence, divergence, momentum and Fib proximity`
+      + (r.higherTFConflict ? '\n⚠ Penalized: higher timeframe contradicts this signal' : '');
+    const stackTitle = r.bullStack ? 'EMA9 > EMA20 > EMA50 — bullish alignment'
+                      : r.bearStack ? 'EMA9 < EMA20 < EMA50 — bearish alignment'
+                      : 'EMAs are tangled / not cleanly stacked — lower conviction';
+    const distTitle = r.e20dist != null
+      ? `Price is ${Math.abs(r.e20dist).toFixed(2)}% ${r.e20dist >= 0 ? 'above' : 'below'} EMA20 (${fmt(r.e20)})`
+      : 'EMA20 distance unavailable';
+    const ageTitle = r.trendAge != null
+      ? `${r.trendAge} candle${r.trendAge === 1 ? '' : 's'} since the last EMA9/EMA20 cross — ${r.trendAge <= 3 ? 'very fresh' : r.trendAge <= 8 ? 'fresh' : r.trendAge <= 40 ? 'established' : 'aging, may be overextended'}`
+      : 'No recent EMA cross detected';
 
     const badges = [];
     if (r.divAligned)        badges.push(`<span title="RSI divergence confirms signal" style="font-size:8px;color:#00e5a0">Div✓</span>`);
@@ -1844,18 +1867,18 @@ function renderScreenerTable() {
     if (r.higherTFConflict)  badges.push(`<span title="Higher TF opposes signal" style="font-size:8px;color:#ff3d5a">HTF⚠</span>`);
 
     return `<tr style="${rowStyle}">
-      <td>
+      <td title="${symTitle}">
           <span class="scr-sym" onclick="loadCoinFromScreener('${safeSym}')">${safeDisp}${isTop5 ? '⭐' : ''}</span>
           <div style="display:flex;gap:3px;margin-top:2px;flex-wrap:wrap">
             <span style="font-size:8px;color:var(--text3);font-family:var(--mono)">${r.primaryTf || '—'}</span>
             ${badges.join('')}
           </div>
       </td>
-      <td class="scr-price">${fmt(r.price)}</td>
-      <td class="scr-chg ${chgCls}">${(r.chgPct >= 0 ? '+' : '') + r.chgPct.toFixed(2) + '%'}</td>
-      <td><span class="signal-badge signal-${r.signal}">${r.signalLabel}</span></td>
-      <td class="scr-rsi">${r.rsi !== null ? Math.round(r.rsi) : '—'}</td>
-      <td>
+      <td class="scr-price" title="${priceTitle}">${fmt(r.price)}</td>
+      <td class="scr-chg ${chgCls}" title="${chgTitle}">${(r.chgPct >= 0 ? '+' : '') + r.chgPct.toFixed(2) + '%'}</td>
+      <td title="${signalTitle}"><span class="signal-badge signal-${r.signal}">${r.signalLabel}</span></td>
+      <td class="scr-rsi" title="${rsiTitle}">${r.rsi !== null ? Math.round(r.rsi) : '—'}</td>
+      <td title="${scoreTitle}">
         <div class="score-bar">
           <div class="score-track">
             <div class="score-fill" style="width:${r.score}%;background:${scoreCol}"></div>
@@ -1863,18 +1886,18 @@ function renderScreenerTable() {
           <span style="font-size:9px;color:${scoreCol};font-family:var(--mono);font-weight:700;min-width:24px">${r.score}</span>
         </div>
       </td>
-      <td><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${stackCol}">${stackTxt}</span></td>
+      <td title="${stackTitle}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${stackCol}">${stackTxt}</span></td>
       <td title="${mtfTitle}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${mtfCol}">${mtfStr}${r.higherTFConflict ? ' ⚠' : ''}</span></td>
       <td title="Vol ratio: ${r.volRatio != null ? r.volRatio.toFixed(2) : '—'}x vs 20-bar avg | Cur: ${fmtK(r.curVol)} | Avg: ${fmtK(r.avgVol)}${r.volSpike ? ' | 🔥 Spike (≥2x)' : r.volHot ? ' | ⚡ Hot (≥1.5x)' : ''}${r.volAligned ? ' | ✓ Aligned with signal' : r.volOpposed ? ' | ⚠ Opposed to signal' : ''}"><span style="font-family:var(--mono);font-size:9px;font-weight:700;color:${volCol};background:${volBg};border-radius:6px;padding:1px 5px">${volStr}${volMark}</span></td>
-      <td><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
+      <td title="${distTitle}"><span style="font-family:var(--mono);font-size:9px;color:${distCol}">${distStr}</span></td>
       <td title="24h High: ${fmt(r.hi24)} | Low: ${fmt(r.lo24)} | Position: ${Math.round(hlPos)}% from low${hlMark === ' ✓' ? ' — good entry side' : hlMark === ' ⚠' ? ' — extended, caution' : ''}">
         <div style="position:relative;width:36px;height:6px;background:var(--bg3);border-radius:2px;display:inline-block">
           <div style="position:absolute;left:0;top:0;height:100%;width:${hlPos}%;background:${hlBarCol};border-radius:2px"></div>
         </div>
         <span style="font-family:var(--mono);font-size:8px;color:${hlMarkCol};margin-left:3px">${hlLabel}${hlMark}</span>
       </td>
-      <td><span style="font-family:var(--mono);font-size:9px;color:${ageCol}">${ageTxt}</span></td>
-      <td><span style="font-family:var(--mono);font-size:9px;color:${fibCol}">${fibTxt}</span></td>
+      <td title="${ageTitle}"><span style="font-family:var(--mono);font-size:9px;color:${ageCol}">${ageTxt}</span></td>
+      <td title="${fibTitle}"><span style="font-family:var(--mono);font-size:9px;color:${fibCol}">${fibTxt}</span></td>
       <td><button class="scr-trade-btn" onclick="loadCoinFromScreener('${safeSym}')">Trade →</button></td>
     </tr>`;
   }).join('');
