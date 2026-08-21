@@ -27,24 +27,23 @@
   </div>
   <div class="topbar-center">
     <div id="sym-group" class="pill-group" role="group" aria-label="Symbol selector">
-      <button class="pill-btn sym-active active" onclick="TT.switchSym('BTCUSDT')">BTC</button>
-      <button class="pill-btn" onclick="TT.switchSym('ETHUSDT')">ETH</button>
-      <button class="pill-btn" onclick="TT.switchSym('SOLUSDT')">SOL</button>
-      <button class="pill-btn" onclick="TT.switchSym('BNBUSDT')">BNB</button>
-      <button class="pill-btn" onclick="TT.switchSym('XRPUSDT')">XRP</button>
-      <button class="pill-btn" onclick="TT.switchSym('TONUSDT')">TON</button>
+      <button class="pill-btn sym-active active" onclick="switchSym('BTCUSDT')">BTC</button>
+      <button class="pill-btn" onclick="switchSym('ETHUSDT')">ETH</button>
+      <button class="pill-btn" onclick="switchSym('SOLUSDT')">SOL</button>
+      <button class="pill-btn" onclick="switchSym('BNBUSDT')">BNB</button>
+      <button class="pill-btn" onclick="switchSym('XRPUSDT')">XRP</button>
     </div>
     <div id="tf-group" class="pill-group" role="group" aria-label="Timeframe selector">
-      <button class="pill-btn" data-tf="1m"  onclick="TT.switchTF('1m')">1m</button>
-      <button class="pill-btn active" data-tf="5m"  onclick="TT.switchTF('5m')">5m</button>
-      <button class="pill-btn" data-tf="15m" onclick="TT.switchTF('15m')">15m</button>
-      <button class="pill-btn" data-tf="1h"  onclick="TT.switchTF('1h')">1h</button>
-      <button class="pill-btn" data-tf="4h"  onclick="TT.switchTF('4h')">4h</button>
+      <button class="pill-btn" data-tf="1m"  onclick="switchTF('1m')">1m</button>
+      <button class="pill-btn active" data-tf="5m"  onclick="switchTF('5m')">5m</button>
+      <button class="pill-btn" data-tf="15m" onclick="switchTF('15m')">15m</button>
+      <button class="pill-btn" data-tf="1h"  onclick="switchTF('1h')">1h</button>
+      <button class="pill-btn" data-tf="4h"  onclick="switchTF('4h')">4h</button>
     </div>
     <div id="exch-group" class="pill-group" role="group" aria-label="Exchange selector">
-      <button class="pill-btn active sym-active" onclick="TT.switchExchange('bybit',this)">Bybit</button>
-      <button class="pill-btn" onclick="TT.switchExchange('binance',this)">Binance</button>
-      <button class="pill-btn" onclick="TT.switchExchange('okx',this)">OKX</button>
+      <button class="pill-btn active sym-active" onclick="switchExchange('bybit',this)">Bybit</button>
+      <button class="pill-btn" onclick="switchExchange('binance',this)">Binance</button>
+      <button class="pill-btn" onclick="switchExchange('okx',this)">OKX</button>
     </div>
   </div>
   <div class="topbar-right">
@@ -52,7 +51,7 @@
       <span id="live-price" class="live-price" aria-live="polite">—</span>
       <span id="live-change" class="live-change" aria-live="polite">—</span>
     </div>
-    <button class="btn btn--icon theme-btn" onclick="TT.toggleTheme()" aria-label="Toggle theme">🌙</button>
+    <button class="btn btn--icon theme-btn" onclick="toggleTheme()" aria-label="Toggle theme">🌙</button>
   </div>
 </header>
 
@@ -62,7 +61,7 @@
   <aside class="col-left">
 
     <div id="card-watchlist" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-watchlist')">
+      <div class="card-header" onclick="toggleCard('card-watchlist')">
         <span class="card-title">📋 Watchlist</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -71,14 +70,14 @@
         <div class="wl-add-row">
           <input id="wl-inp" class="input-field" placeholder="BTC / BTCUSDT"
                  aria-label="Add coin to watchlist"
-                 style="flex:1" onkeydown="if(event.key==='Enter')TT.wlAdd()" />
-          <button class="btn btn--primary btn--icon" onclick="TT.wlAdd()" aria-label="Add to watchlist">+</button>
+                 style="flex:1" onkeydown="if(event.key==='Enter')wlAdd()" />
+          <button class="btn btn--primary btn--icon" onclick="wlAdd()" aria-label="Add to watchlist">+</button>
         </div>
       </div>
     </div>
 
     <div id="card-regime" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-regime')">
+      <div class="card-header" onclick="toggleCard('card-regime')">
         <span class="card-title">🧭 Market Regime</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -106,7 +105,7 @@
     </div>
 
     <div id="card-structure" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-structure')">
+      <div class="card-header" onclick="toggleCard('card-structure')">
         <span class="card-title">📐 Structure</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -125,14 +124,14 @@
           <div class="stat-item"><div class="stat-lbl">AVWAP</div><div class="stat-val mono" id="avwap-val" data-tip="avwap">—</div></div>
         </div>
         <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn" style="flex:1;font-size:9px" onclick="TT.anchorToSessionOpen()">⚓ Session Open</button>
-          <button class="btn" style="flex:1;font-size:9px" onclick="TT.clearAnchor()">✕ Clear</button>
+          <button class="btn" style="flex:1;font-size:9px" onclick="anchorToSessionOpen()">⚓ Session Open</button>
+          <button class="btn" style="flex:1;font-size:9px" onclick="clearAnchor()">✕ Clear</button>
         </div>
       </div>
     </div>
 
     <div id="card-ema" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-ema')">
+      <div class="card-header" onclick="toggleCard('card-ema')">
         <span class="card-title">📊 Indicators</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -164,15 +163,15 @@
           </div>
         </div>
         <div style="display:flex;gap:5px;margin-top:10px;flex-wrap:wrap" role="group" aria-label="Chart overlays">
-          <button class="btn btn--icon active" id="overlay-fib-btn" onclick="TT.toggleOverlay('fib',this)" aria-pressed="true">Fib</button>
-          <button class="btn btn--icon active" id="overlay-vp-btn"  onclick="TT.toggleOverlay('vp',this)"  aria-pressed="true">VP</button>
-          <button class="btn btn--icon"        id="overlay-div-btn" onclick="TT.toggleOverlay('div',this)" aria-pressed="false">Div</button>
+          <button class="btn btn--icon active" id="overlay-fib-btn" onclick="toggleOverlay('fib',this)" aria-pressed="true">Fib</button>
+          <button class="btn btn--icon active" id="overlay-vp-btn"  onclick="toggleOverlay('vp',this)"  aria-pressed="true">VP</button>
+          <button class="btn btn--icon"        id="overlay-div-btn" onclick="toggleOverlay('div',this)" aria-pressed="false">Div</button>
         </div>
       </div>
     </div>
 
     <div id="card-alerts" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-alerts')">
+      <div class="card-header" onclick="toggleCard('card-alerts')">
         <span class="card-title">🔔 Alerts</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -180,9 +179,9 @@
         <div class="alert-input-row">
           <input id="alrt-price" class="input-field" type="number" placeholder="Price"
                  aria-label="Alert price"
-                 style="flex:1" onkeydown="if(event.key==='Enter')TT.addAlert()" />
-          <button class="btn" id="alrt-dir-btn" onclick="TT.toggleAlertDir()">Above ▲</button>
-          <button class="btn btn--primary btn--icon" onclick="TT.addAlert()" aria-label="Add alert">+</button>
+                 style="flex:1" onkeydown="if(event.key==='Enter')addAlert()" />
+          <button class="btn" id="alrt-dir-btn" onclick="toggleAlertDir()">Above ▲</button>
+          <button class="btn btn--primary btn--icon" onclick="addAlert()" aria-label="Add alert">+</button>
         </div>
         <div id="alert-list" class="alert-list" role="list"></div>
       </div>
@@ -194,11 +193,11 @@
   <main class="col-center">
 
     <div id="card-chart" class="card chart-card">
-      <div class="card-header" onclick="TT.toggleCard('card-chart')">
+      <div class="card-header" onclick="toggleCard('card-chart')">
         <span class="card-title">📈 Chart</span>
         <div class="chart-header-right">
-          <button class="btn btn--icon" onclick="TT.setDirection('long')"  title="L key" aria-label="Set direction Long">▲ Long</button>
-          <button class="btn btn--icon" onclick="TT.setDirection('short')" title="S key" aria-label="Set direction Short">▼ Short</button>
+          <button class="btn btn--icon" onclick="setDirection('long')"  title="L key" aria-label="Set direction Long">▲ Long</button>
+          <button class="btn btn--icon" onclick="setDirection('short')" title="S key" aria-label="Set direction Short">▼ Short</button>
           <label for="inp-rr" class="mono" style="font-size:10px;color:var(--text2)">RR:</label>
           <input id="inp-rr" type="number" value="2" min="1" max="10" step="0.5"
             aria-label="Risk-reward ratio"
@@ -214,18 +213,33 @@
     </div>
 
     <div id="card-sug" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-sug')">
+      <div class="card-header" onclick="toggleCard('card-sug')">
         <span class="card-title">🎯 Trade Setup</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
       <div class="card-body">
         <div class="sug-header">
           <span id="sug-dir" class="sug-dir">▲ LONG</span>
+          <button id="sug-pin-btn" type="button" class="sug-pin-btn mono"
+            style="margin-left:6px;font-size:10px;padding:2px 7px;border-radius:4px;
+            border:1px solid var(--border);background:var(--bg3);color:var(--text3);
+            cursor:pointer" onclick="togglePinSuggestion()" title="Pin/unpin this entry">📌</button>
+          <button id="sug-track-btn" type="button" class="sug-track-btn mono"
+            style="margin-left:4px;font-size:10px;padding:2px 7px;border-radius:4px;
+            border:1px solid var(--border);background:var(--bg3);color:var(--text3);
+            cursor:pointer" onclick="toggleTrackSuggestion()" title="Log this trade to the journal and auto-close it on stop/target">▶ Track</button>
           <span class="sug-quality-badge">
             <span id="entry-quality-label" class="entry-quality-label">—</span>
             <span id="entry-quality-score" class="entry-quality-score">—</span>
+            <svg id="quality-sparkline" width="44" height="16" viewBox="0 0 44 16"
+              style="vertical-align:middle;margin-left:4px" aria-hidden="true"></svg>
           </span>
         </div>
+        <div id="mtf-agree-badge" class="mono" style="font-size:10px;color:var(--text3);
+          margin:2px 0 4px;cursor:pointer" onclick="checkMTFAgreement()" title="Click to check multi-timeframe agreement">
+          ⇄ Check MTF agreement
+        </div>
+        <div id="liq-zone-warn" class="risk-warn" role="alert" style="display:none;margin-bottom:6px"></div>
         <p id="sug-reason" class="sug-reason"></p>
         <div id="entry-quality-factors" class="entry-quality-factors"></div>
         <!-- Squeeze state — inside card-body, after quality factors -->
@@ -238,8 +252,9 @@
 
         <div class="sug-levels">
           <div class="sug-level sug-entry">
-            <span class="sug-level-lbl">Entry</span>
+            <span class="sug-level-lbl">Entry <span id="sug-locked-age" class="sug-locked-age mono" style="font-size:8px;color:var(--text3);font-weight:400"></span></span>
             <span class="sug-level-val mono" id="sug-entry">—</span>
+            <span class="sug-live-delta mono" id="sug-live-delta" style="display:block;font-size:9px;color:var(--text3);font-weight:400"></span>
           </div>
           <div class="sug-level sug-stop">
             <span class="sug-level-lbl">Stop</span>
@@ -307,7 +322,7 @@
     </div>
 
     <div id="card-zones" class="card card--collapsible collapsed">
-      <div class="card-header" onclick="TT.toggleCard('card-zones')">
+      <div class="card-header" onclick="toggleCard('card-zones')">
         <span class="card-title">🎯 Entry Zones</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -338,7 +353,7 @@
   <aside class="col-right">
 
     <div id="card-futures" class="card card--collapsible card--accent-top">
-      <div class="card-header" onclick="TT.toggleCard('card-futures')">
+      <div class="card-header" onclick="toggleCard('card-futures')">
         <span class="card-title">⚡ Futures Calc</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -350,7 +365,7 @@
               <span class="fut-prefix" aria-hidden="true">$</span>
               <input id="inp-capital" class="input-field" type="number" value="100" min="1"
                      placeholder="100" aria-label="Capital in USD"
-                     oninput="TT.computeAndRender()" />
+                     oninput="window.computeAndRender?.()" />
             </div>
           </div>
           <div class="fut-input-row">
@@ -359,20 +374,20 @@
               <span class="fut-prefix" aria-hidden="true">$</span>
               <input id="inp-margin" class="input-field" type="number" value="20" min="1"
                      placeholder="20" aria-label="Margin in USD"
-                     oninput="TT.computeAndRender()" />
+                     oninput="window.computeAndRender?.()" />
             </div>
           </div>
           <div class="fut-input-row">
             <label for="inp-entry" class="fut-lbl">Entry</label>
             <input id="inp-entry" class="input-field" type="number" placeholder="Auto"
                    aria-label="Entry price (leave blank for auto)"
-                   oninput="TT.computeAndRender()" />
+                   oninput="window.computeAndRender?.()" />
           </div>
           <div class="fut-input-row">
             <label for="inp-stop" class="fut-lbl">Stop</label>
             <input id="inp-stop" class="input-field" type="number" placeholder="Auto"
                    aria-label="Stop loss price (leave blank for auto)"
-                   oninput="TT.computeAndRender()" />
+                   oninput="window.computeAndRender?.()" />
           </div>
         </div>
         <div class="lev-section">
@@ -382,27 +397,31 @@
               <input id="lev-manual" class="lev-manual-input" type="number"
                      value="10" min="1" max="100" step="1"
                      aria-label="Leverage (manual entry)"
-                     oninput="TT._onLeverageInput(+this.value)" />
+                     oninput="_onLeverageInput(+this.value)" />
               <span id="lev-display" class="lev-display" aria-hidden="true">10×</span>
             </div>
           </div>
           <input id="lev-slider" type="range" min="1" max="100" value="10"
                  aria-label="Leverage slider"
-                 oninput="TT._onLeverageInput(+this.value)" />
+                 oninput="_onLeverageInput(+this.value)" />
           <div class="lev-ticks" aria-hidden="true"><span>1×</span><span>10×</span><span>25×</span><span>50×</span><span>100×</span></div>
         </div>
         <div class="fee-type-row">
           <span class="stat-lbl" id="fee-type-label">Fee Type</span>
           <div class="pill-group" style="width:auto" role="group" aria-labelledby="fee-type-label">
-            <button class="pill-btn active" onclick="TT.state.feeType='maker';TT.computeAndRender()">Maker 0.02%</button>
-            <button class="pill-btn"        onclick="TT.state.feeType='taker';TT.computeAndRender()">Taker 0.05%</button>
+            <button class="pill-btn active" onclick="state.feeType='maker';computeAndRender()">Maker 0.02%</button>
+            <button class="pill-btn"        onclick="state.feeType='taker';computeAndRender()">Taker 0.05%</button>
           </div>
         </div>
         <div class="liq-section">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-            <span class="stat-lbl">Liquidation Price</span>
+            <span class="stat-lbl">Liquidation Price
+              <span id="liq-tier-badge" class="mono" style="font-size:8px;color:var(--text3);margin-left:4px;cursor:pointer" title="Click to see the tier table used" onclick="toggleTierTable()"></span>
+            </span>
             <span class="mono" id="fv-liq-price">—</span>
           </div>
+          <div id="liq-tier-table" class="mono" style="display:none;font-size:9px;color:var(--text3);
+            background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:5px 7px;margin-bottom:5px"></div>
           <div class="progress-track" role="meter" aria-label="Liquidation proximity">
             <div id="liq-bar" class="progress-bar" style="width:0%"></div>
           </div>
@@ -424,16 +443,19 @@
           <div class="fee-row"><span class="stat-lbl">Open fee</span><span class="mono" id="fee-open">—</span></div>
           <div class="fee-row"><span class="stat-lbl">Close fee</span><span class="mono" id="fee-close">—</span></div>
           <div class="fee-row"><span class="stat-lbl">Total fees</span><span class="mono" id="fee-tot">—</span></div>
+          <div class="fee-row"><span class="stat-lbl">Funding rate</span><span class="mono" id="fee-funding-rate">—</span></div>
+          <div class="fee-row"><span class="stat-lbl">Next funding</span><span class="mono" id="fee-funding-time">—</span></div>
+          <div class="fee-row"><span class="stat-lbl">Est. funding cost</span><span class="mono" id="fee-funding-cost">—</span></div>
         </div>
         <div class="pnl-log-btns">
-          <button class="btn btn--primary" style="flex:1" onclick="TT.logTrade('win')">✓ Win</button>
-          <button class="btn btn--danger"  style="flex:1" onclick="TT.logTrade('loss')">✗ Loss</button>
+          <button class="btn btn--primary" style="flex:1" onclick="logTrade('win')">✓ Win</button>
+          <button class="btn btn--danger"  style="flex:1" onclick="logTrade('loss')">✗ Loss</button>
         </div>
       </div>
     </div>
 
     <div id="card-pnl" class="card card--collapsible">
-      <div class="card-header" onclick="TT.toggleCard('card-pnl')">
+      <div class="card-header" onclick="toggleCard('card-pnl')">
         <span class="card-title">💹 Session P&amp;L</span>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
@@ -453,8 +475,8 @@
           </table>
         </div>
         <div style="display:flex;gap:6px;margin-top:8px">
-          <button class="btn" style="flex:1;font-size:9px" onclick="TT.clearPnL()">Clear</button>
-          <button class="btn" style="flex:1;font-size:9px" onclick="TT.exportPnL()">⬇ Export</button>
+          <button class="btn" style="flex:1;font-size:9px" onclick="clearPnL()">Clear</button>
+          <button class="btn" style="flex:1;font-size:9px" onclick="exportPnL()">⬇ Export</button>
         </div>
       </div>
     </div>
@@ -466,11 +488,11 @@
 <div class="bottom-row">
 
   <div id="card-journal" class="card card--collapsible collapsed">
-    <div class="card-header" onclick="TT.toggleCard('card-journal')">
+    <div class="card-header" onclick="toggleCard('card-journal')">
       <span class="card-title">📓 Trade Journal</span>
       <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn--icon" style="font-size:9px" onclick="event.stopPropagation();TT.exportJournal()">⬇ Export</button>
-        <button class="btn btn--primary btn--icon" onclick="event.stopPropagation();TT.openJournalEntry({})">+ Log</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="event.stopPropagation();exportJournal()">⬇ Export</button>
+        <button class="btn btn--primary btn--icon" onclick="event.stopPropagation();openJournalEntry({})">+ Log</button>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
     </div>
@@ -556,7 +578,7 @@
           <input type="hidden" id="jrn-regime" />
           <input type="hidden" id="jrn-score" />
           <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn btn--primary" style="flex:1" onclick="TT.saveJournalEntry()">💾 Save</button>
+            <button class="btn btn--primary" style="flex:1" onclick="saveJournalEntry()">💾 Save</button>
             <button class="btn" onclick="document.getElementById('jrn-form').classList.remove('show')">Cancel</button>
           </div>
         </div>
@@ -577,11 +599,11 @@
 
   <!-- Screener -->
   <div id="card-screener" class="card card--collapsible collapsed">
-    <div class="card-header" onclick="TT.toggleCard('card-screener')">
+    <div class="card-header" onclick="toggleCard('card-screener')">
       <span class="card-title">🔍 Screener</span>
       <div style="display:flex;gap:6px;align-items:center">
-        <button id="scr-run-btn" class="btn btn--primary btn--icon" onclick="event.stopPropagation();TT.runScreener()">▶ Scan</button>
-        <button class="btn btn--icon" onclick="event.stopPropagation();TT.toggleScrAuto()" id="scr-auto-btn">Auto</button>
+        <button id="scr-run-btn" class="btn btn--primary btn--icon" onclick="event.stopPropagation();runScreener()">▶ Scan</button>
+        <button class="btn btn--icon" onclick="event.stopPropagation();toggleScrAuto()" id="scr-auto-btn">Auto</button>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
     </div>
@@ -589,26 +611,26 @@
       <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px">
         <span class="stat-lbl" id="list-mode-label">List:</span>
         <div role="group" aria-labelledby="list-mode-label" style="display:contents">
-          <button class="pill-btn scr-list-btn active" onclick="TT.scrSetListMode('default',this)">Default</button>
-          <button class="pill-btn scr-list-btn"        onclick="TT.scrSetListMode('curated',this)">Curated</button>
+          <button class="pill-btn scr-list-btn active" onclick="scrSetListMode('default',this)">Default</button>
+          <button class="pill-btn scr-list-btn"        onclick="scrSetListMode('curated',this)">Curated</button>
         </div>
         <span id="scr-coin-count" class="stat-lbl" style="margin-left:2px">— coins</span>
         <div style="display:flex;gap:4px;margin-left:auto">
           <input id="scr-coin-inp" class="input-field" placeholder="Add coin"
                  aria-label="Add custom coin to screener list"
                  style="width:88px;font-size:10px"
-                 onkeydown="if(event.key==='Enter')TT.scrAddCustomCoin()" />
-          <button class="btn btn--icon" style="font-size:9px" onclick="TT.scrAddCustomCoin()" title="Add coin" aria-label="Add coin">+</button>
-          <button class="btn btn--icon" style="font-size:9px" onclick="TT.scrResetCoins()"    title="Reset list" aria-label="Reset coin list">↺</button>
+                 onkeydown="if(event.key==='Enter')scrAddCustomCoin()" />
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrAddCustomCoin()" title="Add coin" aria-label="Add coin">+</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrResetCoins()"    title="Reset list" aria-label="Reset coin list">↺</button>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-bottom:8px">
         <span class="stat-lbl" id="fetch-top-label">Fetch top:</span>
         <div role="group" aria-labelledby="fetch-top-label" style="display:contents">
-          <button class="btn btn--icon" style="font-size:9px" onclick="TT.scrFetchTopCoins(50,this)">50</button>
-          <button class="btn btn--icon" style="font-size:9px" onclick="TT.scrFetchTopCoins(100,this)">100</button>
-          <button class="btn btn--icon" style="font-size:9px" onclick="TT.scrFetchTopCoins(200,this)">200</button>
-          <button class="btn btn--icon" style="font-size:9px" onclick="TT.scrFetchTopCoins(null,this)">ALL</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(50,this)">50</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(100,this)">100</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(200,this)">200</button>
+          <button class="btn btn--icon" style="font-size:9px" onclick="scrFetchTopCoins(null,this)">ALL</button>
         </div>
       </div>
       <div id="scr-tier-legend" style="display:none;flex-wrap:wrap;gap:4px;margin-bottom:8px" aria-hidden="true">
@@ -626,40 +648,40 @@
       </div>
       <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px" role="group" aria-label="Screener timeframes">
         <span class="stat-lbl" style="margin-right:4px">TFs:</span>
-        <button class="pill-btn active" onclick="TT.setScrTF('5m',this)">5m</button>
-        <button class="pill-btn active" onclick="TT.setScrTF('15m',this)">15m</button>
-        <button class="pill-btn active" onclick="TT.setScrTF('1h',this)">1h</button>
-        <button class="pill-btn active" onclick="TT.setScrTF('4h',this)">4h</button>
+        <button class="pill-btn active" onclick="setScrTF('5m',this)">5m</button>
+        <button class="pill-btn active" onclick="setScrTF('15m',this)">15m</button>
+        <button class="pill-btn active" onclick="setScrTF('1h',this)">1h</button>
+        <button class="pill-btn active" onclick="setScrTF('4h',this)">4h</button>
       </div>
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
         <label for="scr-text-filter" class="sr-only">Filter by symbol</label>
         <input id="scr-text-filter" class="input-field" placeholder="Filter by symbol…"
-               style="flex:1;font-size:10px" oninput="TT.renderScreenerTable()" />
-        <button class="btn btn--icon" style="font-size:9px" onclick="TT.clearScreenerFilter()" aria-label="Clear symbol filter">✕</button>
+               style="flex:1;font-size:10px" oninput="renderScreenerTable()" />
+        <button class="btn btn--icon" style="font-size:9px" onclick="clearScreenerFilter()" aria-label="Clear symbol filter">✕</button>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px" role="group" aria-label="Signal filters">
-        <button class="pill-btn scr-filter-btn active" onclick="TT.scrSetFilter('all',this)">All</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('bull',this)">Bull</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('bear',this)">Bear</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('cross',this)">Cross</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fresh',this)">Fresh ≤5c</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('ob',this)">OB &gt;70</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('os',this)">OS &lt;30</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('vol_spike',this)">Vol 🔥</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('vol_align',this)">Vol ✓</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('near_ema',this)">Near EMA</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fib',this)">Fib</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fib618',this)">61.8</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fib50',this)">50%</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fib382',this)">38.2</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fib_sup',this)">Fib Sup</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('fib_res',this)">Fib Res</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('mtf_full',this)">MTF Full</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('mtf_most',this)">MTF Most</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('div_bull',this)">Div Bull</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('div_bear',this)">Div Bear</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('accel',this)">Accel</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.scrSetFilter('no_htf_conflict',this)">No HTF⚠</button>
+        <button class="pill-btn scr-filter-btn active" onclick="scrSetFilter('all',this)">All</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('bull',this)">Bull</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('bear',this)">Bear</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('cross',this)">Cross</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fresh',this)">Fresh ≤5c</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('ob',this)">OB &gt;70</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('os',this)">OS &lt;30</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('vol_spike',this)">Vol 🔥</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('vol_align',this)">Vol ✓</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('near_ema',this)">Near EMA</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib',this)">Fib</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib618',this)">61.8</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib50',this)">50%</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib382',this)">38.2</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib_sup',this)">Fib Sup</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('fib_res',this)">Fib Res</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('mtf_full',this)">MTF Full</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('mtf_most',this)">MTF Most</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('div_bull',this)">Div Bull</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('div_bear',this)">Div Bear</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('accel',this)">Accel</button>
+        <button class="pill-btn scr-filter-btn" onclick="scrSetFilter('no_htf_conflict',this)">No HTF⚠</button>
       </div>
       <div id="scr-progress" class="scr-progress" style="display:none" role="status" aria-live="polite">
         <div class="progress-track" style="margin-bottom:4px">
@@ -671,19 +693,19 @@
         <table id="scr-table" class="scr-table" aria-label="Screener results table">
           <thead>
             <tr>
-              <th onclick="TT.scrSort('sym')"    scope="col" title="Symbol · primary scan TF shown below">Symbol / TF</th>
-              <th onclick="TT.scrSort('price')"  scope="col">Price</th>
-              <th onclick="TT.scrSort('chg')"    scope="col">Chg%</th>
-              <th onclick="TT.scrSort('signal')" scope="col">Signal</th>
-              <th onclick="TT.scrSort('rsi')"    scope="col">RSI</th>
-              <th onclick="TT.scrSort('score')"  scope="col">Score ↓</th>
-              <th onclick="TT.scrSort('stack')"  scope="col">Stack</th>
-              <th onclick="TT.scrSort('mtf')"    scope="col" title="Weighted by TF — higher TFs count more">MTF</th>
-              <th onclick="TT.scrSort('vol')"    scope="col" title="Vol ratio · ✓ aligned with signal · ⚠ opposed">Vol</th>
-              <th onclick="TT.scrSort('dist')"   scope="col">Dist</th>
-              <th onclick="TT.scrSort('hlpos')"  scope="col" title="H/L position · ✓ good entry side · ⚠ extended">H/L</th>
-              <th onclick="TT.scrSort('age')"    scope="col" title="Candles since last EMA9/20 cross">Age</th>
-              <th onclick="TT.scrSort('fib')"    scope="col" title="Nearest Fib level">Fib</th>
+              <th onclick="scrSort('sym')"    scope="col" title="Symbol · primary scan TF shown below">Symbol / TF</th>
+              <th onclick="scrSort('price')"  scope="col">Price</th>
+              <th onclick="scrSort('chg')"    scope="col">Chg%</th>
+              <th onclick="scrSort('signal')" scope="col">Signal</th>
+              <th onclick="scrSort('rsi')"    scope="col">RSI</th>
+              <th onclick="scrSort('score')"  scope="col">Score ↓</th>
+              <th onclick="scrSort('stack')"  scope="col">Stack</th>
+              <th onclick="scrSort('mtf')"    scope="col" title="Weighted by TF — higher TFs count more">MTF</th>
+              <th onclick="scrSort('vol')"    scope="col" title="Vol ratio · ✓ aligned with signal · ⚠ opposed">Vol</th>
+              <th onclick="scrSort('dist')"   scope="col">Dist</th>
+              <th onclick="scrSort('hlpos')"  scope="col" title="H/L position · ✓ good entry side · ⚠ extended">H/L</th>
+              <th onclick="scrSort('age')"    scope="col" title="Candles since last EMA9/20 cross">Age</th>
+              <th onclick="scrSort('fib')"    scope="col" title="Nearest Fib level">Fib</th>
               <th scope="col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -697,11 +719,11 @@
 
   <!-- MTF Confluence -->
   <div id="card-mtf" class="card card--collapsible collapsed">
-    <div class="card-header" onclick="TT.toggleCard('card-mtf')">
+    <div class="card-header" onclick="toggleCard('card-mtf')">
       <span class="card-title">🔀 MTF Confluence</span>
       <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn--icon" id="mtf-current-btn" onclick="event.stopPropagation();TT.mtfScanCurrent()" title="Scan current chart symbol" style="font-size:9px">⊕ Current</button>
-        <button class="btn btn--primary btn--icon" id="mtf-scan-btn" onclick="event.stopPropagation();TT.runMTFScan()">▶ Scan</button>
+        <button class="btn btn--icon" id="mtf-current-btn" onclick="event.stopPropagation();mtfScanCurrent()" title="Scan current chart symbol" style="font-size:9px">⊕ Current</button>
+        <button class="btn btn--primary btn--icon" id="mtf-scan-btn" onclick="event.stopPropagation();runMTFScan()">▶ Scan</button>
         <span class="card-chevron" aria-hidden="true">▾</span>
       </div>
     </div>
@@ -710,30 +732,30 @@
         <label for="mtf-coin-inp" class="sr-only">Add coin to MTF scan</label>
         <input id="mtf-coin-inp" class="input-field" placeholder="Add coin e.g. BTC"
                style="width:110px;font-size:10px"
-               onkeydown="if(event.key==='Enter')TT.mtfAddCoin()" />
-        <button class="btn btn--icon" style="font-size:9px" onclick="TT.mtfAddCoin()" aria-label="Add coin">+</button>
-        <button class="btn btn--icon btn--primary" style="font-size:9px" onclick="TT.mtfScanCurrent()" title="Add current chart symbol and scan">⊕ Current</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="TT.mtfLoadFromScreener()" title="Load top scored coins from last screener scan">⬇ From Screener</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="TT.mtfLoadWatchlist()" title="Load watchlist coins">⬇ Watchlist</button>
-        <button class="btn btn--icon" style="font-size:9px" onclick="TT.mtfClearCoins()">✕ Clear</button>
+               onkeydown="if(event.key==='Enter')mtfAddCoin()" />
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfAddCoin()" aria-label="Add coin">+</button>
+        <button class="btn btn--icon btn--primary" style="font-size:9px" onclick="mtfScanCurrent()" title="Add current chart symbol and scan">⊕ Current</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadFromScreener()" title="Load top scored coins from last screener scan">⬇ From Screener</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfLoadWatchlist()" title="Load watchlist coins">⬇ Watchlist</button>
+        <button class="btn btn--icon" style="font-size:9px" onclick="mtfClearCoins()">✕ Clear</button>
         <span id="mtf-coin-count" class="stat-lbl">0 coins</span>
       </div>
       <div style="display:flex;align-items:center;gap:4px;margin-bottom:8px;flex-wrap:wrap"
            role="group" aria-label="MTF timeframes">
         <span class="stat-lbl" style="margin-right:4px">TFs:</span>
-        <button class="pill-btn"        id="mtf-tf-1m"  onclick="TT.toggleMTFTf('1m',this)">1m</button>
-        <button class="pill-btn active" id="mtf-tf-5m"  onclick="TT.toggleMTFTf('5m',this)">5m</button>
-        <button class="pill-btn active" id="mtf-tf-15m" onclick="TT.toggleMTFTf('15m',this)">15m</button>
-        <button class="pill-btn active" id="mtf-tf-30m" onclick="TT.toggleMTFTf('30m',this)">30m</button>
-        <button class="pill-btn active" id="mtf-tf-1h"  onclick="TT.toggleMTFTf('1h',this)">1h</button>
-        <button class="pill-btn active" id="mtf-tf-4h"  onclick="TT.toggleMTFTf('4h',this)">4h</button>
+        <button class="pill-btn"        id="mtf-tf-1m"  onclick="toggleMTFTf('1m',this)">1m</button>
+        <button class="pill-btn active" id="mtf-tf-5m"  onclick="toggleMTFTf('5m',this)">5m</button>
+        <button class="pill-btn active" id="mtf-tf-15m" onclick="toggleMTFTf('15m',this)">15m</button>
+        <button class="pill-btn active" id="mtf-tf-30m" onclick="toggleMTFTf('30m',this)">30m</button>
+        <button class="pill-btn active" id="mtf-tf-1h"  onclick="toggleMTFTf('1h',this)">1h</button>
+        <button class="pill-btn active" id="mtf-tf-4h"  onclick="toggleMTFTf('4h',this)">4h</button>
       </div>
       <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap" role="group" aria-label="MTF filters">
-        <button class="pill-btn scr-filter-btn active" onclick="TT.mtfSetFilter('all',this)">All</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.mtfSetFilter('full_bull',this)">Full Bull</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.mtfSetFilter('full_bear',this)">Full Bear</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.mtfSetFilter('conflict',this)">Conflict</button>
-        <button class="pill-btn scr-filter-btn" onclick="TT.mtfSetFilter('clean',this)">No Conflict</button>
+        <button class="pill-btn scr-filter-btn active" onclick="mtfSetFilter('all',this)">All</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('full_bull',this)">Full Bull</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('full_bear',this)">Full Bear</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('conflict',this)">Conflict</button>
+        <button class="pill-btn scr-filter-btn" onclick="mtfSetFilter('clean',this)">No Conflict</button>
       </div>
       <div id="mtf-progress" style="display:none;margin-bottom:6px" role="status" aria-live="polite">
         <div class="progress-track" style="margin-bottom:4px">
@@ -754,16 +776,16 @@
 
   <!-- Replay Engine -->
   <div id="card-replay" class="card card--collapsible collapsed">
-    <div class="card-header" onclick="TT.toggleCard('card-replay')">
+    <div class="card-header" onclick="toggleCard('card-replay')">
       <span class="card-title">⏪ Replay</span>
       <span class="card-chevron" aria-hidden="true">▾</span>
     </div>
     <div class="card-body">
       <div class="replay-controls">
-        <button id="replay-load-btn" class="btn" onclick="TT.replayLoad()">⬇ Load</button>
-        <button id="replay-play-btn" class="btn" onclick="TT.replayToggle()" disabled>▶ Play</button>
-        <button class="btn btn--icon" onclick="TT.replayStep()" aria-label="Step one bar">⏭</button>
-        <button class="btn btn--danger btn--icon" onclick="TT.replayReset()" aria-label="Reset replay">↺</button>
+        <button id="replay-load-btn" class="btn" onclick="replayLoad()">⬇ Load</button>
+        <button id="replay-play-btn" class="btn" onclick="replayToggle()" disabled>▶ Play</button>
+        <button class="btn btn--icon" onclick="replayStep()" aria-label="Step one bar">⏭</button>
+        <button class="btn btn--danger btn--icon" onclick="replayReset()" aria-label="Reset replay">↺</button>
         <label for="replay-speed" class="fut-lbl">Speed:</label>
         <input id="replay-speed" type="range" min="1" max="10" value="2"
                style="width:80px;vertical-align:middle"
@@ -799,23 +821,36 @@
 <script type="module" src="./main.js"></script>
 
 <script nonce="tt2025">
-// Journal form helper — reads DOM then delegates to TT
 function openCurrentSetupInJournal() {
-  const sym    = window.TT?.state?.sym || '';
-  const tf     = window.TT?.state?.tf  || '5m';
-  const dir    = document.getElementById('sug-dir')?.textContent?.includes('LONG') ? 'long' : 'short';
-  const entry  = parseFloat(document.getElementById('sug-entry')?.textContent)  || 0;
-  const stop   = parseFloat(document.getElementById('sug-stop')?.textContent)   || 0;
-  const target = parseFloat(document.getElementById('sug-target')?.textContent) || 0;
-  window.TT?.openJournalEntry({ sym, dir, tf, entry, stop, target });
+  const sym   = window.state?.sym || '';
+  const tf    = window.state?.tf  || '5m';
+  const dir   = document.getElementById('sug-dir')?.textContent?.includes('LONG') ? 'long' : 'short';
+  const entry = parseFloat(document.getElementById('sug-entry')?.textContent) || 0;
+  const stop  = parseFloat(document.getElementById('sug-stop')?.textContent)  || 0;
+  const target= parseFloat(document.getElementById('sug-target')?.textContent)|| 0;
+  if (window.openJournalEntry) {
+    window.openJournalEntry({ sym, dir, tf, entry, stop, target });
+  }
 }
 
-// Journal filter pill helper
+function _onLeverageInput(val) {
+  const v = Math.min(100, Math.max(1, val || 1));
+  const slider  = document.getElementById('lev-slider');
+  const manual  = document.getElementById('lev-manual');
+  const display = document.getElementById('lev-display');
+  if (slider)  slider.value  = v;
+  if (manual)  manual.value  = v;
+  if (display) display.textContent = v + '×';
+  if (slider)  slider.style.setProperty('--lev-pct', ((v - 1) / 99 * 100) + '%');
+  if (window.state) window.state.leverage = v;
+  if (window.computeAndRender) window.computeAndRender();
+}
+
 function _jrnFilter(filter, btn) {
   btn.closest('.pill-group').querySelectorAll('.pill-btn')
     .forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  window.TT?.renderJournalList(filter);
+  if (window.renderJournalList) window.renderJournalList(filter);
 }
 
 document.addEventListener('click', e => {

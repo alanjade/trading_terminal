@@ -48,6 +48,17 @@ export const state = {
   crossovers: [],
 
   suggestion: { entry: 0, stop: 0, target: 0, dir: 'long' },
+  // Locked suggestion: the "active" trade idea shown as the main Entry.
+  // Only replaced when the setup direction changes or gets invalidated
+  // (price trades through its stop) — NOT on every candle recompute.
+  lockedSuggestion: null,
+  // Live per-symbol maintenance-margin tiers (Bybit/OKX), null until
+  // fetched or when unavailable (e.g. Binance — see services/riskTiers.js).
+  liveRiskTiers: null,
+  // Current funding rate + next funding timestamp for state.sym (services/funding.js).
+  fundingInfo: null,
+  // Rolling entry-quality score history for the sparkline (reset on symbol switch).
+  qualityHistory: [],
 
   regime: null,
 
@@ -158,6 +169,9 @@ export function resetCandleState() {
   state.avwapCumPV = 0; state.avwapCumV = 0;
   state.workerVP = null;
   state.suggestion = { entry: 0, stop: 0, target: 0, dir: 'long' };
+  state.lockedSuggestion = null;
+  state.qualityHistory = [];
+  state.fundingInfo = null;
   state.regime = null;
   state.swingPoints = []; state.structureEvents = [];
   state.hoverIdx = -1;

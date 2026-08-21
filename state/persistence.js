@@ -9,6 +9,7 @@ const SETTINGS_KEY  = 'settings_v2';
 const COLLAPSED_KEY = 'collapsed';
 const WATCHLIST_KEY = 'wl';
 const JOURNAL_KEY   = 'journal_v1';
+const LOCKED_SUG_KEY = 'locked_sug_v1';
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 
@@ -126,4 +127,34 @@ export function exportJournalCSV(trades) {
     t.score ?? '', t.regime ?? ''
   ].join(',')));
   return rows.join('\n');
+}
+
+// ── Locked Suggestion ────────────────────────────────────────────────────────
+// Keyed by sym+tf so switching symbols and coming back restores the trade
+// idea you were tracking, without leaking one symbol's locked entry onto
+// another. `manual` flags a user-pinned suggestion (see main.js) so it's
+// never silently auto-replaced.
+
+export function saveLockedSuggestion(sym, tf, sug) {
+  try {
+    if (!sug) {
+      const all = JSON.parse(localStorage.getItem(LOCKED_SUG_KEY) || '{}');
+      delete all[`${sym}:${tf}`];
+      localStorage.setItem(LOCKED_SUG_KEY, JSON.stringify(all));
+      return;
+    }
+    const all = JSON.parse(localStorage.getItem(LOCKED_SUG_KEY) || '{}');
+    all[`${sym}:${tf}`] = sug;
+    // Cap stored entries so this never grows unbounded across symbols.
+    const keys = Object.keys(all);
+    if (keys.length > 50) delete all[keys[0]];
+    localStorage.setItem(LOCKED_SUG_KEY, JSON.stringify(all));
+  } catch(e) {}
+}
+
+export function loadLockedSuggestion(sym, tf) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOCKED_SUG_KEY) || '{}');
+    return all[`${sym}:${tf}`] || null;
+  } catch(e) { return null; }
 }

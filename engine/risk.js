@@ -14,37 +14,90 @@ export const FEE_RATES = {
   taker: 0.0005,  // 0.05% — Binance/Bybit taker
 };
 
+// ── Maintenance Margin Tiers ───────────────────────────────────────────────────
+// Tiered by position notional (USDT). These mirror the publicly-published
+// tier tables exchanges use for major linear-USDT pairs (BTC/ETH-class).
+// Altcoins and lower-liquidity pairs often have steeper/fewer tiers — treat
+// this as a realistic major-pair approximation, not an exact per-symbol feed.
+// mmRate = maintenance margin rate; mmAmt = maintenance amount deduction (USDT)
+// used by the exchange's exact formula: MM = notional*mmRate - mmAmt.
+// Source: representative of Binance/Bybit/OKX public tier schedules (subject
+// to periodic exchange updates — re-verify against the exchange API for
+// production use).
+export const MM_TIERS = {
+  binance: [
+    { max: 50_000,      mmRate: 0.004,  mmAmt: 0 },
+    { max: 250_000,     mmRate: 0.005,  mmAmt: 50 },
+    { max: 1_000_000,   mmRate: 0.010,  mmAmt: 1_300 },
+    { max: 5_000_000,   mmRate: 0.025,  mmAmt: 16_300 },
+    { max: 20_000_000,  mmRate: 0.050,  mmAmt: 141_300 },
+    { max: Infinity,    mmRate: 0.100,  mmAmt: 1_141_300 },
+  ],
+  bybit: [
+    { max: 50_000,      mmRate: 0.005,  mmAmt: 0 },
+    { max: 200_000,     mmRate: 0.006,  mmAmt: 50 },
+    { max: 500_000,     mmRate: 0.010,  mmAmt: 850 },
+    { max: 1_000_000,   mmRate: 0.020,  mmAmt: 5_850 },
+    { max: 5_000_000,   mmRate: 0.040,  mmAmt: 25_850 },
+    { max: Infinity,    mmRate: 0.080,  mmAmt: 225_850 },
+  ],
+  okx: [
+    { max: 50_000,      mmRate: 0.004,  mmAmt: 0 },
+    { max: 250_000,     mmRate: 0.005,  mmAmt: 50 },
+    { max: 1_000_000,   mmRate: 0.010,  mmAmt: 1_300 },
+    { max: 5_000_000,   mmRate: 0.025,  mmAmt: 16_300 },
+    { max: Infinity,    mmRate: 0.050,  mmAmt: 141_300 },
+  ],
+};
+
+function lookupMMTier(exchange, notional, customTiers = null) {
+  const tiers = customTiers?.length ? customTiers : (MM_TIERS[exchange] || MM_TIERS.binance);
+  return tiers.find(t => notional <= t.max) || tiers[tiers.length - 1];
+}
+
 // ── Liquidation Prices ────────────────────────────────────────────────────────
 
 /**
- * Simplified isolated-margin liquidation price.
- * Approximation valid for Binance/Bybit/OKX linear contracts.
- * Liq price ≈ entry × (1 − 1/leverage × maintenanceMarginRate × 0.9)
- *
- * Full formula requires maintenance margin tier tables per exchange.
- * We use 0.9 factor as a conservative safety estimate.
+ * Isolated-margin liquidation price using real tiered maintenance margin.
+ * Formula (isolated, linear USDT contract):
+ *   Long:  Liq = Entry × (1 − 1/Leverage) + (mmRate × Entry − mmAmt/Qty)
+ *   Short: Liq = Entry × (1 + 1/Leverage) − (mmRate × Entry − mmAmt/Qty)
+ * where Qty = positionNotional / Entry.
+ * `exchange` selects the tier table ('binance' | 'bybit' | 'okx'); defaults
+ * to binance's schedule if unrecognized.
  */
-export function calcLiqPrice(entry, leverage, dir) {
+export function calcLiqPrice(entry, leverage, dir, margin = null, exchange = 'binance', customTiers = null) {
   if (!entry || !leverage || leverage < 1) return null;
   const isLong = dir === 'long';
+
+  // If margin isn't supplied we can't know notional/tier — fall back to the
+  // lowest (tightest) tier as a conservative estimate.
+  const notional = margin ? margin * leverage : 0;
+  const tier = lookupMMTier(exchange, notional || 0, customTiers);
+  const qty  = notional > 0 ? notional / entry : 0;
+  const mmPerUnit = qty > 0 ? tier.mmRate * entry - tier.mmAmt / qty : tier.mmRate * entry;
+
   return isLong
-    ? entry * (1 - (1 / leverage) * 0.9)
-    : entry * (1 + (1 / leverage) * 0.9);
+    ? entry * (1 - 1 / leverage) + mmPerUnit
+    : entry * (1 + 1 / leverage) - mmPerUnit;
 }
 
 /**
- * Bybit USDT perpetual liquidation (more accurate — includes maintenance margin).
- * maintenanceMarginRate defaults to 0.5% (lowest tier, <5000 USDT position).
+ * Bybit USDT perpetual liquidation using the tiered MM schedule.
+ * `margin` is the isolated margin allocated to the position (USDT).
  */
-export function calcLiqPriceBybit(entry, margin, leverage, dir, mmRate = 0.005) {
+export function calcLiqPriceBybit(entry, margin, leverage, dir, mmRateOverride = null) {
   if (!entry || !margin || !leverage) return null;
-  const positionSize = margin * leverage;
+  const notional = margin * leverage;
+  const tier = mmRateOverride != null
+    ? { mmRate: mmRateOverride, mmAmt: 0 }
+    : lookupMMTier('bybit', notional);
+  const qty = notional / entry;
+  const mmPerUnit = tier.mmRate * entry - tier.mmAmt / qty;
   const isLong = dir === 'long';
-  // Liq = entry - (margin - fees - maintenanceMargin) / (qty)
-  // Simplified: Liq ≈ entry × (1 − (1 − mmRate) / leverage)
   return isLong
-    ? entry * (1 - (1 - mmRate) / leverage)
-    : entry * (1 + (1 - mmRate) / leverage);
+    ? entry * (1 - 1 / leverage) + mmPerUnit
+    : entry * (1 + 1 / leverage) - mmPerUnit;
 }
 
 // ── Core Futures Math ─────────────────────────────────────────────────────────
@@ -54,14 +107,15 @@ export function calcLiqPriceBybit(entry, margin, leverage, dir, mmRate = 0.005) 
  * Returns a complete futures metrics object.
  */
 export function calcFuturesMetrics({
-  capital, margin, leverage, entry, stop, dir, rrRatio, feeType
+  capital, margin, leverage, entry, stop, dir, rrRatio, feeType, exchange = 'binance', customTiers = null
 }) {
   const isLong    = dir === 'long';
   const feeRate   = FEE_RATES[feeType] || FEE_RATES.maker;
   const posSize   = margin * leverage;
 
-  // Liquidation
-  const liqPrice    = calcLiqPrice(entry, leverage, dir) || 0;
+  // Liquidation — uses live per-symbol tiers when available (customTiers),
+  // else the static major-pair approximation for the position's notional.
+  const liqPrice    = calcLiqPrice(entry, leverage, dir, margin, exchange, customTiers) || 0;
   const liqDistPct  = entry > 0 ? Math.abs(liqPrice - entry) / entry * 100 : 0;
 
   // P&L if entry + stop are set
@@ -91,9 +145,12 @@ export function calcFuturesMetrics({
     bePrice = isLong ? entry + beMove : entry - beMove;
   }
 
-  // Liquidation gauge %
-  const maxSafeDist = (1 / leverage) * 100 * 0.9;
-  const liqGaugePct = Math.min(100, liqDistPct / (maxSafeDist || 1) * 100);
+  // Liquidation gauge: previously divided liqDistPct by a "max safe distance"
+  // that was computed with the exact same flat factor as liqPrice itself,
+  // which made this always read ~100% regardless of actual risk — a dead
+  // metric. Now it's simply the real liq distance (%), capped at 100, which
+  // directly reflects how far price can move before liquidation.
+  const liqGaugePct = Math.max(0, Math.min(100, liqDistPct));
 
   return {
     posSize, liqPrice, liqDistPct, liqGaugePct,

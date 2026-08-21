@@ -130,6 +130,63 @@ export function saveJournalEntry() {
   showToast('Trade logged ✓');
 }
 
+// ── Auto-Tracked Trades ─────────────────────────────────────────────────────
+// Programmatic logging for suggestions the user pins/locks and chooses to
+// "Track" (see main.js togglePinSuggestion/toggleTrackSuggestion). These are
+// tagged with `source: 'auto'` and `trackingId` so a later stop/target hit
+// can find and close the matching open entry without user input.
+
+export function logAutoTrade({ sym, dir, tf, entry, stop, target, regime, score, trackingId }) {
+  const trade = {
+    id: Date.now(),
+    timestamp: Date.now(),
+    sym, dir, tf, entry, stop, target,
+    exit: undefined, result: undefined, pnl: undefined, rr: undefined,
+    setup: 'other', emotion: 'neutral', mistakes: [],
+    notes: 'Auto-logged from locked suggestion.',
+    regime, score,
+    source: 'auto',
+    trackingId,
+  };
+  trades.push(trade);
+  saveJournal(trades);
+  renderJournalList();
+  renderJournalStats();
+  return trade;
+}
+
+/** Finds the open auto-tracked trade for this trackingId and fills in its exit. */
+export function closeAutoTrade(trackingId, exitPrice, resultOverride) {
+  const t = trades.find(t => t.trackingId === trackingId && t.exit === undefined);
+  if (!t) return null;
+
+  const risk   = Math.abs(t.entry - t.stop);
+  const profit = t.dir === 'long' ? exitPrice - t.entry : t.entry - exitPrice;
+  t.exit   = exitPrice;
+  t.pnl    = profit;
+  t.rr     = risk > 0 ? profit / risk : null;
+  t.result = resultOverride || (profit > 0 ? 'win' : profit < -risk * 0.1 ? 'loss' : 'be');
+
+  saveJournal(trades);
+  renderJournalList();
+  renderJournalStats();
+  return t;
+}
+
+/** True if this trackingId already has an open (unclosed) auto-logged entry. */
+export function hasOpenAutoTrade(trackingId) {
+  return trades.some(t => t.trackingId === trackingId && t.exit === undefined);
+}
+
+/** Removes an open auto-tracked trade without a confirm dialog (used by the
+ *  "untrack" toggle — the user already made the decision by clicking). */
+export function deleteAutoTrade(trackingId) {
+  trades = trades.filter(t => !(t.trackingId === trackingId && t.exit === undefined));
+  saveJournal(trades);
+  renderJournalList();
+  renderJournalStats();
+}
+
 export function deleteJournalTrade(id) {
   if (!confirm('Delete this journal entry?')) return;
   trades = trades.filter(t => t.id !== id);

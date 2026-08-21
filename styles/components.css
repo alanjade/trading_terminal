@@ -382,6 +382,10 @@ input[type=range]::-webkit-slider-thumb {
   transform: translateX(-50%) translateY(0);
   opacity: 1;
 }
+.toast.toast-warn {
+  border-color: var(--red);
+  color: var(--red);
+}
 
 /* ── Scrollbars ──────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; }
