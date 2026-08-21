@@ -77,7 +77,7 @@ Object.assign(window, {
   addAlert, deleteAlert, toggleAlertDir, wlAdd, wlRemove,
   logTrade, clearPnL, exportPnL,
   toggleOverlay, toggleTheme, setRRRatio, setDirection,
-  togglePinSuggestion, toggleTrackSuggestion, checkMTFAgreement, toggleTierTable,
+  togglePinSuggestion, toggleTrackSuggestion, checkMTFAgreement, toggleTierTable, unlockSuggestion,
   runScreener, toggleScrAuto,
   scrSetFilter, scrSort,
   scrSetListMode, scrFetchTopCoins, scrAddCustomCoin, scrResetCoins,
@@ -678,6 +678,30 @@ async function _refreshRiskTiers(sym, exchange) {
       computeAndRender();
     }
   } catch(e) { /* keep static fallback */ }
+}
+
+// Discards the current locked/pinned entry entirely and forces a fresh
+// suggestion to lock on the next computation — for when you want a new
+// calc right now instead of waiting for a stop-out or direction flip.
+// If the discarded suggestion was being tracked in the journal, that open
+// entry is removed too (nothing was actually traded, so nothing to log).
+function unlockSuggestion() {
+  const locked = state.lockedSuggestion;
+  if (!locked) { showToast?.('No locked entry to unlock'); return; }
+
+  if (locked.tracked && locked.trackingId) {
+    deleteAutoTrade(locked.trackingId);
+  }
+
+  state.lockedSuggestion = null;
+  saveLockedSuggestion(state.sym, state.tf, null);
+  showToast?.('Entry unlocked — recalculating fresh');
+
+  computeAndRender();
+  updateTrackButtonUI();
+
+  const pinBtn = dom.lazy('sug-pin-btn');
+  if (pinBtn) { pinBtn.style.background = 'var(--bg3)'; pinBtn.style.color = 'var(--text3)'; pinBtn.title = 'Pin this entry'; }
 }
 
 function togglePinSuggestion() {
