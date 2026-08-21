@@ -44,7 +44,7 @@ const TF_ORDER = ['1m','3m','5m','15m','30m','1h','4h','1d'];
 let scrListMode  = 'default';
 let scrCoinList  = [...SCR_COINS_DEFAULT];
 let scrExchange  = 'bybit';
-let scrTFs       = ['5m','15m','1h','4h'];
+let scrTFs       = ['5m','15m','30m','1h','4h'];
 let scrFilter    = 'all';
 let scrSortKey   = 'score';
 let scrSortAsc   = false;
@@ -1737,13 +1737,25 @@ function renderScreenerTable() {
   if (!tbody) return;
 
   const textQ = getScreenerTextFilter();
+  const minScoreEl = dom.lazy('scr-min-score');
+  const minScore = minScoreEl?.value !== '' && minScoreEl?.value != null ? +minScoreEl.value : 0;
   let rows = applyScreenerFilters(scrResults, scrFilter).filter(r =>
-    !textQ || r.sym.includes(textQ) || r.sym.replace('USDT','').includes(textQ)
+    (!textQ || r.sym.includes(textQ) || r.sym.replace('USDT','').includes(textQ)) &&
+    r.score >= minScore
   );
   rows = sortScreenerResults(rows, scrSortKey, scrSortAsc);
 
+  const countEl = dom.lazy('scr-min-score-count');
+  if (countEl) {
+    countEl.textContent = minScore > 0
+      ? `${rows.length}/${scrResults.length} shown`
+      : (scrResults.length ? `${scrResults.length} total` : '');
+  }
+
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="scr-empty">No results — run a scan first</td></tr>';
+    tbody.innerHTML = minScore > 0
+      ? `<tr><td colspan="14" class="scr-empty">No results ≥ score ${minScore} — try lowering the min score</td></tr>`
+      : '<tr><td colspan="14" class="scr-empty">No results — run a scan first</td></tr>';
     return;
   }
 

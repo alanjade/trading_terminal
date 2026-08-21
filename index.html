@@ -37,6 +37,7 @@
       <button class="pill-btn" data-tf="1m"  onclick="switchTF('1m')">1m</button>
       <button class="pill-btn active" data-tf="5m"  onclick="switchTF('5m')">5m</button>
       <button class="pill-btn" data-tf="15m" onclick="switchTF('15m')">15m</button>
+      <button class="pill-btn" data-tf="30m" onclick="switchTF('30m')">30m</button>
       <button class="pill-btn" data-tf="1h"  onclick="switchTF('1h')">1h</button>
       <button class="pill-btn" data-tf="4h"  onclick="switchTF('4h')">4h</button>
     </div>
@@ -654,6 +655,7 @@
         <span class="stat-lbl" style="margin-right:4px">TFs:</span>
         <button class="pill-btn active" onclick="setScrTF('5m',this)">5m</button>
         <button class="pill-btn active" onclick="setScrTF('15m',this)">15m</button>
+        <button class="pill-btn active" onclick="setScrTF('30m',this)">30m</button>
         <button class="pill-btn active" onclick="setScrTF('1h',this)">1h</button>
         <button class="pill-btn active" onclick="setScrTF('4h',this)">4h</button>
       </div>
@@ -662,6 +664,12 @@
         <input id="scr-text-filter" class="input-field" placeholder="Filter by symbol…"
                style="flex:1;font-size:10px" oninput="renderScreenerTable()" />
         <button class="btn btn--icon" style="font-size:9px" onclick="clearScreenerFilter()" aria-label="Clear symbol filter">✕</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <label for="scr-min-score" class="stat-lbl" style="white-space:nowrap;font-size:9px">Min score</label>
+        <input id="scr-min-score" class="input-field" type="number" min="0" max="100" step="5"
+               placeholder="0" style="width:60px;font-size:10px" oninput="renderScreenerTable()" />
+        <span id="scr-min-score-count" class="stat-lbl" style="font-size:9px;color:var(--text3)"></span>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px" role="group" aria-label="Signal filters">
         <button class="pill-btn scr-filter-btn active" onclick="scrSetFilter('all',this)">All</button>
@@ -871,4 +879,4 @@ document.addEventListener('click', e => {
 </script>
 
 </body>
-</html> 
+</html>

@@ -616,6 +616,52 @@
     max-width: 100%;
     min-width: 0;
   }
+
+  /* Trade Setup header buttons (pin / track / unlock) were tiny, fixed-size
+     inline-styled buttons that didn't wrap — on narrow screens they'd get
+     clipped or overflow the card instead of dropping to a second row. */
+  .sug-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  .sug-pin-btn,
+  .sug-track-btn,
+  .sug-unlock-btn {
+    font-size: 11px !important;
+    padding: 5px 10px !important;
+    min-height: 30px;
+  }
+  .sug-quality-badge {
+    flex-basis: 100%;
+    justify-content: flex-start;
+    margin-top: 2px;
+  }
+
+  /* Liquidation tier badge/popover and MTF badge are click targets — give
+     them real tap area on touch screens instead of an 8-10px hitbox. */
+  #liq-tier-badge {
+    display: inline-block;
+    padding: 4px 2px;
+  }
+  #mtf-agree-badge {
+    padding: 6px 2px;
+    font-size: 11px !important;
+  }
+  #liq-tier-table {
+    font-size: 10px !important;
+  }
+
+  /* Screener: new min-score row + existing symbol filter stack cleanly,
+     and the coin-set (50/100/200/ALL) + TF pill rows wrap instead of
+     forcing horizontal scroll on the controls themselves (the table still
+     scrolls horizontally on its own, which is fine/expected on mobile). */
+  #scr-min-score {
+    width: 50px;
+  }
+  .scr-tfs,
+  #card-screener .scr-controls {
+    flex-wrap: wrap;
+  }
 }
 @media (max-width: 480px) {
   .topbar-center {
@@ -624,7 +670,15 @@
     flex-wrap: nowrap; 
     padding-bottom: 4px;
   }
-  .pill-btn { padding: 4px 8px; } 
+  .pill-btn { padding: 4px 8px; }
+
+  /* Suggestion sparkline is a fixed-size SVG that doesn't need to shrink,
+     but the funding rows can get tight next to their values on very
+     narrow phones — let them wrap rather than truncate. */
+  .fee-row {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
 }
 
 @media (max-width: 380px) {
