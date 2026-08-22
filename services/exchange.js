@@ -266,11 +266,29 @@ export class TradeStream {
 
 // ── Multi-Symbol Screener Fetch ───────────────────────────────────────────────
 
-const RATE_LIMIT_DELAY_MS = 180; // ~5 req/s per exchange
+const RATE_LIMIT_DELAY_MS = 180; // ~5 req/s per exchange, baseline
+const MAX_RETRIES         = 2;   // total attempts per (symbol, tf) before giving up
+const RETRY_BACKOFF_MS    = 500;
 
 /**
  * Fetches klines for multiple symbols across timeframes with rate limiting.
  * Calls onProgress({ done, total, sym }) for each completed symbol.
+ *
+ * Retries each (symbol, tf) fetch up to MAX_RETRIES times on failure/timeout
+ * before giving up on it — a single dropped packet or a transient 429
+ * previously meant that symbol silently vanished from the results with no
+ * way to tell "filtered out" from "never fetched."
+ *
+ * Also backs off (temporarily slows down) when it sees consecutive failures,
+ * since a burst of failures usually means the exchange/worker is rate-
+ * limiting the whole batch, not just one request — hammering it faster only
+ * makes that worse.
+ *
+ * The returned Map has two extra (non-enumerable-safe, plain) properties
+ * attached for visibility: `failedSymbols` (symbols with zero usable TFs
+ * after retries) and `failedFetchCount` (total individual tf fetches that
+ * never succeeded), so callers can tell the user how much of a scan
+ * actually completed instead of silently rendering a partial table.
  *
  * @param {string[]}  symbols
  * @param {string[]}  tfs       - timeframes to fetch per symbol
@@ -279,29 +297,50 @@ const RATE_LIMIT_DELAY_MS = 180; // ~5 req/s per exchange
  * @returns {Map<string, Record<string, Candle[]>>}  symbol → tf → candles
  */
 export async function batchFetchScreener(symbols, tfs, exchName, onProgress) {
-  const exch    = EXCHANGES[exchName];
+  const exch = EXCHANGES[exchName];
   if (!exch) return new Map();
 
   const results = new Map();
+  const failedSymbols = [];
+  let failedFetchCount = 0;
+  let consecutiveFailures = 0;
   let done = 0;
 
   for (const sym of symbols) {
     const tfMap = {};
     for (const tf of tfs) {
-      try {
-        const data    = await tryFetch(exch.klineUrl(sym, tf), 6_000);
-        const candles = exch.parseKlines(data);
-        if (candles?.length >= 10) tfMap[tf] = candles;
-      } catch(e) {
-        // Skip silently; screener handles missing data
+      let ok = false;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          const data    = await tryFetch(exch.klineUrl(sym, tf), 6_000);
+          const candles = exch.parseKlines(data);
+          if (candles?.length >= 10) { tfMap[tf] = candles; ok = true; }
+          break; // fetch succeeded (even if data was thin) — no retry needed
+        } catch(e) {
+          if (attempt < MAX_RETRIES) {
+            await sleep(RETRY_BACKOFF_MS * attempt); // widen the gap each retry
+          }
+        }
       }
-      await sleep(RATE_LIMIT_DELAY_MS);
+      if (!ok) failedFetchCount++;
+
+      // Adaptive backoff: if we're failing a lot in a row, the exchange/worker
+      // is probably rate-limiting us — slow down instead of continuing to
+      // hammer it, which would just fail more requests for no benefit.
+      consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
+      const delay = consecutiveFailures >= 3
+        ? RATE_LIMIT_DELAY_MS * 4
+        : RATE_LIMIT_DELAY_MS;
+      await sleep(delay);
     }
+    if (!Object.keys(tfMap).length) failedSymbols.push(sym);
     results.set(sym, tfMap);
     done++;
     onProgress?.({ done, total: symbols.length, sym });
   }
 
+  results.failedSymbols    = failedSymbols;
+  results.failedFetchCount = failedFetchCount;
   return results;
 }
 

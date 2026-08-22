@@ -1729,7 +1729,13 @@ async function runScreener() {
   scrRunning = false;
   if (btn) { btn.disabled = false; btn.textContent = '▶ Scan'; }
   dom.show(dom.el['scr-progress'], false);
-  showToast(`Screener done: ${scrResults.length} symbols`);
+
+  const failedN = rawData.failedSymbols?.length || 0;
+  if (failedN > 0) {
+    showToast(`Screener done: ${scrResults.length}/${coins.length} symbols (${failedN} failed to fetch — likely rate-limited; try fewer coins/TFs or a different exchange)`, 'toast-warn');
+  } else {
+    showToast(`Screener done: ${scrResults.length} symbols`);
+  }
 }
 
 function renderScreenerTable() {
