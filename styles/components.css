@@ -54,7 +54,11 @@ body {
   pointer-events: none;
 }
 .card--collapsible:not(.collapsed) .card-body {
-  max-height: 2000px;
+  /* Was 2000px — silently clipped any card whose content grew past that
+     (e.g. a 100-200 row screener scan, ~30-35px/row = 3500-7000px+),
+     with no visible sign it happened beyond the content just stopping.
+     Raised well past anything realistic in this app. */
+  max-height: 20000px;
   opacity: 1;
 }
 

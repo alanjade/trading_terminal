@@ -397,9 +397,17 @@
 .scr-table-wrap {
   width: 100%;
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 620px; /* internal scroll for big scans — table header stays reachable instead of the page becoming one giant scroll */
   max-width: 100%;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+}
+.scr-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg2);
+  z-index: 1;
 }
 .scr-table {
   width: 100%;
